@@ -5,7 +5,7 @@ use ratatui::{
 };
 use crate::app::App;
 
-pub fn render(_app: &mut App, f: &mut Frame) {
+pub fn render(app: &mut App, f: &mut Frame) {
 
     let outer_layout = Layout::default()
         .direction(Direction::Vertical)
@@ -25,6 +25,9 @@ pub fn render(_app: &mut App, f: &mut Frame) {
             .alignment(Alignment::Center),
         outer_layout[1],
     );
+
+    // render the windows
+    app.job_overview.render(f, &outer_layout[0]);
 
 }
 

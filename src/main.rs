@@ -12,7 +12,7 @@ pub mod event;
 pub mod ui;
 pub mod tui;
 pub mod update;
-
+pub mod job_overview;
 
 
 fn main() -> Result<()> {
