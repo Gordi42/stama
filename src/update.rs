@@ -12,6 +12,11 @@ pub fn update(app: &mut App, key_event: KeyEvent) {
         }
         _ => {}
     };
+
+    // pass the key event to the app menus
+    app.job_overview.input(&mut app.action, key_event);
+
+
     app.handle_action();
 }
 

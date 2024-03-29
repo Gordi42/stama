@@ -5,6 +5,9 @@ pub enum Action {
     #[default]
     None,
     Quit,
+    OpenJobAction,
+    OpenJobAllocation,
+    OpenJobOverview,
 }
 
 pub struct App {

@@ -3,6 +3,10 @@ use ratatui::{
     style::{Color, Style},
     widgets::*,
 };
+use crossterm::event::{KeyCode, KeyEvent};
+
+
+use crate::app::Action;
 
 pub enum WindowFocus {
     JobDetails,
@@ -10,8 +14,10 @@ pub enum WindowFocus {
 }
 
 pub struct JobOverview {
-    pub is_active: bool,      // if the window is active 
+    pub should_render: bool,  // if the window should render
+    pub handle_input: bool,   // if the window should handle input
     pub search_args: String,  // the search arguments for squeue
+    pub minimized: bool,      // if the job list is minimized
     pub focus: WindowFocus,   // which part of the window is in focus
 }
 
@@ -22,8 +28,10 @@ pub struct JobOverview {
 impl JobOverview {
     pub fn new() -> Self {
         Self {
-            is_active: true,
+            should_render: true,
+            handle_input: true,
             search_args: "-U u301533".to_string(),
+            minimized: false,
             focus: WindowFocus::JobDetails,
         }
     }
@@ -37,7 +45,7 @@ impl JobOverview {
 impl JobOverview {
     pub fn render(&self, f: &mut Frame, area: &Rect) {
         // only render if the window is active
-        if !self.is_active { return; }
+        if !self.should_render { return; }
 
         // create a layout for the title
         let layout = Layout::default()
@@ -68,6 +76,9 @@ impl JobOverview {
     }
 
     fn render_joblist(&self, f: &mut Frame, area: &Rect) {
+        if self.minimized {
+            return;
+        }
         // title should be "Job list: squeue {search_args}}"
         let title = format!("Job list: squeue {}", self.search_args);
         
@@ -111,3 +122,75 @@ impl JobOverview {
 // ====================================================================
 //  USER INPUT
 // ====================================================================
+
+impl JobOverview {
+    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) {
+        match key_event.code {
+            // Escaping the program
+            KeyCode::Char('q') => {
+                *action = Action::Quit;
+            },
+            // Next / Previous job
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.next_job();
+            },
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.prev_job();
+            },
+            // Open job action menu
+            KeyCode::Enter | KeyCode::Char('l') => {
+                *action = Action::OpenJobAction;
+            },
+            // Switching focus between job details and log
+            KeyCode::Char('1') => {
+                self.focus = WindowFocus::JobDetails;
+            },
+            KeyCode::Char('2') => {
+                self.focus = WindowFocus::Log;
+            },
+            KeyCode::Right => {
+                self.next_focus();
+            },
+            KeyCode::Left => {
+                self.prev_focus();
+            },
+            // Open job allocation menu
+            KeyCode::Char('a') => {
+                *action = Action::OpenJobAllocation;
+            },
+            // Minimizing/Maximizing the joblist
+            KeyCode::Char('m') => {
+                self.minimized = !self.minimized;
+            },
+            _ => {},
+        }
+    }
+
+    fn next_focus(&mut self) {
+        match self.focus {
+            WindowFocus::JobDetails => {
+                self.focus = WindowFocus::Log;
+            },
+            WindowFocus::Log => {
+                self.focus = WindowFocus::JobDetails;
+            },
+        }
+    }
+
+    fn prev_focus(&mut self) {
+        match self.focus {
+            WindowFocus::JobDetails => {
+                self.focus = WindowFocus::Log;
+            },
+            WindowFocus::Log => {
+                self.focus = WindowFocus::JobDetails;
+            },
+        }
+    }
+
+    fn next_job(&mut self) {
+    }
+
+    fn prev_job(&mut self) {
+    }
+}
