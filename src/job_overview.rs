@@ -83,7 +83,7 @@ impl JobOverview {
             f.render_widget(paragraph, *area);
             return;
         }
-        // title should be "Job list: squeue {search_args}}"
+
         let title = format!("▼ Job list: squeue {}", self.search_args);
         
         let block = Block::default().title(title)
@@ -128,7 +128,12 @@ impl JobOverview {
 // ====================================================================
 
 impl JobOverview {
-    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) {
+    /// Handle user input for the job overview window
+    /// Returns true if the input was handled
+    /// Returns false if the input was not handled
+    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent)
+        -> bool {
+        if !self.handle_input { return false; }
         match key_event.code {
             // Escaping the program
             KeyCode::Char('q') => {
@@ -166,8 +171,9 @@ impl JobOverview {
             KeyCode::Char('m') => {
                 self.minimized = !self.minimized;
             },
-            _ => {},
-        }
+            _ => {return false;},
+        };
+        true
     }
 
     fn next_focus(&mut self) {
