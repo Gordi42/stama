@@ -28,6 +28,7 @@ pub fn render(app: &mut App, f: &mut Frame) {
 
     // render the windows
     app.job_overview.render(f, &outer_layout[0]);
+    app.message.render(f, &outer_layout[0]);
 
 }
 

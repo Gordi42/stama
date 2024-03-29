@@ -1,4 +1,6 @@
-use crate::job_overview::JobOverview;
+use crate::{
+    job_overview::JobOverview,
+    message::Message,};
 
 #[derive(Debug, Default)]
 pub enum Action {
@@ -8,6 +10,7 @@ pub enum Action {
     OpenJobAction,
     OpenJobAllocation,
     OpenJobOverview,
+    OpenMessage(Message),
 }
 
 pub struct App {
@@ -15,6 +18,7 @@ pub struct App {
     pub should_quit: bool,
     pub should_redraw: bool,
     pub job_overview: JobOverview,
+    pub message: Message,
 }
 
 impl App {
@@ -24,6 +28,7 @@ impl App {
             should_quit: false,
             should_redraw: true,
             job_overview: JobOverview::new(),
+            message: Message::new_disabled(),
         }
     }
 
@@ -33,8 +38,20 @@ impl App {
 
 
     pub fn handle_action(&mut self) {
-        match self.action {
+        match &self.action {
             Action::Quit => { self.quit(); }
+            Action::OpenMessage(message) => {
+                self.message = message.clone();
+            }
+            Action::OpenJobOverview => {
+                self.message = Message::new("Opening job overview not implemented");
+            }
+            Action::OpenJobAction => {
+                self.message = Message::new("Opening job action not implemented");
+            }
+            Action::OpenJobAllocation => {
+                self.message = Message::new("Opening job allocation not implemented");
+            }
             _ => {}
         };
         self.action = Action::None;

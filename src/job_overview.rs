@@ -6,6 +6,7 @@ use ratatui::{
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::Action;
+use crate::message::Message;
 
 
 pub enum WindowFocus {
@@ -141,9 +142,13 @@ impl JobOverview {
             },
             // Next / Previous job
             KeyCode::Down | KeyCode::Char('j') => {
+                let message = Message::new("Next job not implemented yet");
+                *action = Action::OpenMessage(message);
                 self.next_job();
             },
             KeyCode::Up | KeyCode::Char('k') => {
+                let message = Message::new("Previous job not implemented yet");
+                *action = Action::OpenMessage(message);
                 self.prev_job();
             },
             // Open job action menu
