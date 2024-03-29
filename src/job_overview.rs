@@ -5,8 +5,8 @@ use ratatui::{
 };
 use crossterm::event::{KeyCode, KeyEvent};
 
-
 use crate::app::Action;
+
 
 pub enum WindowFocus {
     JobDetails,
@@ -47,17 +47,18 @@ impl JobOverview {
         // only render if the window is active
         if !self.should_render { return; }
 
+        let mut constraints = vec![Constraint::Length(1)];
+        if self.minimized {
+            constraints.push(Constraint::Length(1));
+        } else {
+            constraints.push(Constraint::Percentage(30));
+        }
+        constraints.push(Constraint::Min(1));
+
         // create a layout for the title
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(
-                [
-                    Constraint::Min(1),
-                    Constraint::Percentage(30),
-                    Constraint::Percentage(70),
-                ]
-                .as_ref(),
-            )
+            .constraints(constraints.as_slice())
             .split(*area);
 
         // render the title, job list, and job details
@@ -77,10 +78,13 @@ impl JobOverview {
 
     fn render_joblist(&self, f: &mut Frame, area: &Rect) {
         if self.minimized {
+            let paragraph = Paragraph::new("▶ Job: ")
+                .style(Style::default().fg(Color::Gray));
+            f.render_widget(paragraph, *area);
             return;
         }
         // title should be "Job list: squeue {search_args}}"
-        let title = format!("Job list: squeue {}", self.search_args);
+        let title = format!("▼ Job list: squeue {}", self.search_args);
         
         let block = Block::default().title(title)
             .borders(Borders::ALL)
