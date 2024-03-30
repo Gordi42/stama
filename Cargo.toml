@@ -10,3 +10,5 @@ color-eyre = "0.6.2"
 crossterm = "0.27.0"
 ratatui = "0.26.1"
 tui-textarea = "0.4.0"
+toml = "0.5.8"
+serde = { version = "1.0.197", features = ["derive"] }

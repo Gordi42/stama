@@ -17,6 +17,8 @@ pub mod mouse_input;
 pub mod job;
 pub mod job_overview;
 pub mod job_actions;
+pub mod text_field;
+pub mod user_options;
 pub mod message;
 
 use crate::job::{Job, JobStatus};
@@ -45,7 +47,7 @@ fn main() -> Result<()> {
     app.job_overview.joblist
         .push(Job::new(1123, "job10", JobStatus::Pending, 235, "partition2", 2));
     app.job_overview.sort();
-    let mut app = App::new();
+    // let mut app = App::new();
     app.job_overview.set_index(0);
  
 

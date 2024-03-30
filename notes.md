@@ -37,7 +37,8 @@
 - Left/Right: Switch focus between job details and log
 - 1: Focus on job details
 - 2: Focus on log
-- A: Open allocation menu
+- a: Open allocation menu
+- o: Open options menu
 - /: Modify job list filter
 - m: Minimize/Maximize top section
 - n: Minimize/Maximize bottom section

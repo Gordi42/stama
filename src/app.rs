@@ -3,6 +3,7 @@ use crate::{
     message::{Message, MessageKind},
     mouse_input::MouseInput,};
 use crate::job_actions::{JobActionsMenu, JobActions};
+use crate::user_options::UserOptions;
 
 #[derive(Debug, Default)]
 pub enum Action {
@@ -12,6 +13,7 @@ pub enum Action {
     OpenJobAction,
     OpenJobAllocation,
     OpenJobOverview,
+    OpenUserOptions,
     OpenMessage(Message),
     SortJobList,
     JobOption(JobActions)
@@ -24,6 +26,7 @@ pub struct App {
     pub job_overview: JobOverview,
     pub job_actions_menu: JobActionsMenu,
     pub message: Message,
+    pub user_options: UserOptions,
     pub mouse_input: MouseInput,
 }
 
@@ -36,6 +39,7 @@ impl App {
             job_overview: JobOverview::new(),
             job_actions_menu: JobActionsMenu::new(),
             message: Message::new_disabled(),
+            user_options: UserOptions::load(),
             mouse_input: MouseInput::new(),
         }
     }
@@ -67,6 +71,9 @@ impl App {
             }
             Action::OpenJobAllocation => {
                 self.message = Message::new("Opening job allocation not implemented");
+            }
+            Action::OpenUserOptions => {
+                self.user_options.activate();
             }
             Action::SortJobList => {
                 self.job_overview.sort();
