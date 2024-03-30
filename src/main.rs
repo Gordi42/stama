@@ -12,13 +12,21 @@ pub mod event;
 pub mod ui;
 pub mod tui;
 pub mod update;
+pub mod job;
 pub mod job_overview;
 pub mod message;
 
+use crate::job::{Job, JobStatus};
 
 fn main() -> Result<()> {
     // Create an application.
     let mut app = App::new();
+    app.job_overview.joblist
+        .push(Job::new(1, "job1", JobStatus::Running, 10, "partition1", 1));
+    app.job_overview.joblist
+        .push(Job::new(1, "job2", JobStatus::Pending, 235, "partition2", 2));
+    app.job_overview.joblist
+        .push(Job::new(1, "job3", JobStatus::Completed, 5123, "partition3", 120));
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(std::io::stderr());
