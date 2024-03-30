@@ -20,6 +20,7 @@ pub enum WindowFocus {
 pub struct MouseAreas {
     pub joblist_title: Rect,
     pub details_title: Rect,
+    pub bottom_symbol: Rect,
     pub log_title: Rect,
     pub joblist: Rect,
 }
@@ -28,7 +29,8 @@ pub struct JobOverview {
     pub should_render: bool,  // if the window should render
     pub handle_input: bool,   // if the window should handle input
     pub search_args: String,  // the search arguments for squeue
-    pub collapsed: bool,      // if the job list is collapsed
+    pub collapsed_top: bool,  // if the job list is collapsed
+    pub collapsed_bot: bool,  // if the job details are collapsed
     pub focus: WindowFocus,   // which part of the window is in focus
     pub joblist: Vec<Job>,    // the list of jobs
     pub index: usize,         // the index of the job in focus
@@ -48,7 +50,8 @@ impl JobOverview {
             should_render: true,
             handle_input: true,
             search_args: "-U u301533".to_string(),
-            collapsed: false,
+            collapsed_top: false,
+            collapsed_bot: false,
             focus: WindowFocus::JobDetails,
             joblist: vec![],
             index: 0,
@@ -69,12 +72,19 @@ impl JobOverview {
         if !self.should_render { return; }
 
         let mut constraints = vec![Constraint::Length(1)];
-        if self.collapsed {
+        if self.collapsed_top && self.collapsed_bot {
+            constraints.push(Constraint::Length(1));
+            constraints.push(Constraint::Length(1));
+        } else if self.collapsed_top && !self.collapsed_bot {
+            constraints.push(Constraint::Length(1));
+            constraints.push(Constraint::Min(1));
+        } else if !self.collapsed_top && self.collapsed_bot {
+            constraints.push(Constraint::Min(1));
             constraints.push(Constraint::Length(1));
         } else {
             constraints.push(Constraint::Percentage(30));
+            constraints.push(Constraint::Percentage(70));
         }
-        constraints.push(Constraint::Min(1));
 
         // create a layout for the title
         let layout = Layout::default()
@@ -85,7 +95,7 @@ impl JobOverview {
         // render the title, job list, and job details
         self.render_title(f, &layout[0]);
         self.render_joblist(f, &layout[1]);
-        self.render_details(f, &layout[2]);
+        self.render_bottom_section(f, &layout[2]);
     }
 
     fn render_title(&self, f: &mut Frame, area: &Rect) {
@@ -102,7 +112,7 @@ impl JobOverview {
     // ----------------------------------------------------------------------
 
     fn render_joblist(&mut self, f: &mut Frame, area: &Rect) {
-        match self.collapsed {
+        match self.collapsed_top {
             true => self.render_joblist_collapsed(f, area),
             false => self.render_joblist_extended(f, area),
         }
@@ -196,21 +206,47 @@ impl JobOverview {
     // ----------------------------------------------------------------------
     // RENDERING THE JOB DETAILS AND LOG SECTION
     // ----------------------------------------------------------------------
+    fn render_bottom_section(&mut self, f: &mut Frame, area: &Rect) {
+        match self.collapsed_bot {
+            true => self.render_bottom_collapsed(f, area),
+            false => self.render_bottom_extended(f, area),
+        }
+    }
 
-    fn render_details(&self, f: &mut Frame, area: &Rect) {
-        let mut title = vec!{
+    fn render_bottom_collapsed(&mut self, f: &mut Frame, area: &Rect) {
+        let title = vec!{
+            Span::raw("▶ "),
             Span::raw("1. Job details"), 
             Span::raw("  "),
             Span::raw("2. Log"),
         };
 
+        // update the mouse areas
+        self.update_bottom_mouse_positions(area, title.clone(), 0);
+
+        let line = Line::from(title).
+            style(Style::default().fg(Color::Gray));
+        f.render_widget(line, *area);
+    }
+
+    fn render_bottom_extended(&mut self, f: &mut Frame, area: &Rect) {
+        let mut title = vec!{
+            Span::raw("▼ "),
+            Span::raw("1. Job details"), 
+            Span::raw("  "),
+            Span::raw("2. Log"),
+        };
+
+        // update the mouse areas
+        self.update_bottom_mouse_positions(area, title.clone(), 1);
+
         match self.focus {
             WindowFocus::JobDetails => {
-                title[0] = Span::styled("1. Job details", 
+                title[1] = Span::styled("1. Job details", 
                                         Style::default().fg(Color::Blue));
             },
             WindowFocus::Log => {
-                title[2] = Span::styled("2. Log", 
+                title[3] = Span::styled("2. Log", 
                                         Style::default().fg(Color::Blue));
             },
         }
@@ -222,6 +258,25 @@ impl JobOverview {
 
         f.render_widget(block.clone(), *area);
         let _ = block.inner(*area);
+    }
+
+    fn update_bottom_mouse_positions(
+        &mut self, area: &Rect, title: Vec<Span>, offset: u16) {
+        if title.len() != 4 { return; }
+        let mut top_row = area.clone();
+        top_row.height = 1;
+        let mut symbol = top_row.clone();
+        symbol.width = title[0].width() as u16;
+        symbol.x += offset;
+        let mut details_title = top_row.clone();
+        details_title.width = title[1].width() as u16;
+        details_title.x += symbol.width + symbol.x;
+        let mut log_title = top_row.clone();
+        log_title.width = title[3].width() as u16;
+        log_title.x += details_title.width + details_title.x + 2;
+        self.mouse_areas.bottom_symbol = symbol;
+        self.mouse_areas.details_title = details_title;
+        self.mouse_areas.log_title = log_title;
     }
 
 }
@@ -330,10 +385,10 @@ impl JobOverview {
             },
             // Switching focus between job details and log
             KeyCode::Char('1') => {
-                self.focus = WindowFocus::JobDetails;
+                self.select_details();
             },
             KeyCode::Char('2') => {
-                self.focus = WindowFocus::Log;
+                self.select_log();
             },
             KeyCode::Right => {
                 self.next_focus();
@@ -347,11 +402,24 @@ impl JobOverview {
             },
             // Collapsing/Extending the joblist
             KeyCode::Char('m') => {
-                self.collapsed = !self.collapsed;
+                self.collapsed_top = !self.collapsed_top;
+            },
+            KeyCode::Char('n') => {
+                self.collapsed_bot = !self.collapsed_bot;
             },
             _ => {return false;},
         };
         true
+    }
+
+    fn select_details(&mut self) {
+        self.focus = WindowFocus::JobDetails;
+        self.collapsed_bot = false;
+    }
+
+    fn select_log(&mut self) {
+        self.focus = WindowFocus::Log;
+        self.collapsed_bot = false;
     }
 
     fn next_focus(&mut self) {
@@ -411,9 +479,12 @@ impl JobOverview {
         if let Some(event_kind) = mouse_input.kind() {
             match event_kind {
                 MouseEventKind::Down(MouseButton::Left) => {
+                    // joblist title
                     if self.mouse_areas.joblist_title.contains(mouse_pos) {
-                        self.collapsed = !self.collapsed;
+                        self.collapsed_top = !self.collapsed_top;
+                        mouse_input.click();
                     }
+                    // joblist entries
                     if self.mouse_areas.joblist.contains(mouse_pos) {
                         let rel_y = mouse_pos.y - self.mouse_areas.joblist.y;
                         let new_index = rel_y as i32 + self.state.offset() as i32;
@@ -421,6 +492,23 @@ impl JobOverview {
                         if mouse_input.is_double_click() {
                             *action = Action::OpenJobAction;
                         }
+                        mouse_input.click();
+                    }
+                    // collapse symbol
+                    if self.mouse_areas.bottom_symbol.contains(mouse_pos) {
+                        self.collapsed_bot = !self.collapsed_bot;
+                        mouse_input.click();
+                    }
+                    // details title
+                    if self.mouse_areas.details_title.contains(mouse_pos) {
+                        self.focus = WindowFocus::JobDetails;
+                        self.collapsed_bot = false;
+                        mouse_input.click();
+                    }
+                    // log title
+                    if self.mouse_areas.log_title.contains(mouse_pos) {
+                        self.focus = WindowFocus::Log;
+                        self.collapsed_bot = false;
                         mouse_input.click();
                     }
                 },

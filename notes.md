@@ -37,7 +37,8 @@
 - 2: Focus on log
 - A: Open allocation menu
 - /: Modify job list filter
-- M: Minimize/Maximize job list
+- m: Minimize/Maximize top section
+- n: Minimize/Maximize bottom section
 
 ## Color Codes
 - Running: Green
