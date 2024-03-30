@@ -5,13 +5,15 @@ use crate::{
     app::App,
     event::{Event, EventHandler},
     tui::Tui,
-    update::update};
+    update::update,
+    mouse_input::mouse_input,};
 
 pub mod app;
 pub mod event;
 pub mod ui;
 pub mod tui;
 pub mod update;
+pub mod mouse_input;
 pub mod job;
 pub mod job_overview;
 pub mod message;
@@ -58,7 +60,7 @@ fn main() -> Result<()> {
         match tui.events.next()? {
             Event::Tick => {}
             Event::Key(key_event) => update(&mut app, key_event),
-            Event::Mouse(_) => {}
+            Event::Mouse(mouse_event) => mouse_input(&mut app, mouse_event),
             Event::Resize(_, _) => {}
         };
     }

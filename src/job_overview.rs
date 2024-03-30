@@ -3,7 +3,7 @@ use ratatui::{
     style::{Color, Style},
     widgets::*,
 };
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 
 use crate::app::Action;
 use crate::job::{Job, JobStatus};
@@ -366,5 +366,23 @@ impl JobOverview {
             self.index = self.joblist.len() - 1;
         }
         self.state.select(Some(self.index));
+    }
+}
+
+// ====================================================================
+//  MOUSE INPUT
+// ====================================================================
+
+impl JobOverview {
+    pub fn mouse_input(&mut self, _action: &Action, _mouse_event: MouseEvent) { 
+        if !self.handle_input { return; }
+
+        // check if the mouse event is a scroll event
+        if _mouse_event.kind == MouseEventKind::ScrollDown {
+            self.next_job();
+        } else if _mouse_event.kind == MouseEventKind::ScrollUp {
+            self.prev_job();
+        }
+
     }
 }

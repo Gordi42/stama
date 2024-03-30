@@ -2,9 +2,10 @@ use ratatui::{
     prelude::*,
     style::{Color, Style},
     widgets::*,
-    layout::{Layout, Flex},
+    layout::{Layout, Flex, Position,},
 };
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{
+    KeyCode, KeyEvent, MouseEvent, MouseButton, MouseEventKind};
 
 use crate::app::Action;
 
@@ -15,6 +16,7 @@ pub struct Message {
     pub text: String,
     pub color: Color,
     pub height: u16,
+    pub rect: Rect,
 }
 
 // ====================================================================
@@ -29,6 +31,7 @@ impl Message {
             text: text.to_string(),
             color: Color::Yellow,
             height: 2,
+            rect: Rect::default(),
         }
     }
 
@@ -39,6 +42,7 @@ impl Message {
             text: "".to_string(),
             color: Color::Yellow,
             height: 2,
+            rect: Rect::default(),
         }
     }
 }
@@ -48,7 +52,7 @@ impl Message {
 // ====================================================================
 
 impl Message {
-    pub fn render(&self, f: &mut Frame, _area: &Rect) {
+    pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
         if !self.should_render { return; }
 
         let window_width = f.size().width;
@@ -58,6 +62,7 @@ impl Message {
         let vertical = Layout::vertical([self.height+2]).flex(Flex::Center);
         let [rect] = vertical.areas(f.size());
         let [rect] = horizontal.areas(rect);
+        self.rect = rect;
 
         let paragraph = Paragraph::new(self.text.clone())
             .style(Style::default().fg(self.color))
@@ -91,5 +96,33 @@ impl Message {
             _ => {}
         }
         true
+    }
+}
+
+// ====================================================================
+//  MOUSE INPUT
+// ====================================================================
+
+impl Message {
+    pub fn mouse_input(&mut self, 
+                       _action: &mut Action, 
+                       mouse_event: MouseEvent) -> bool {
+        if !self.handle_input { return false; }
+
+        match mouse_event.kind {
+            MouseEventKind::Down(MouseButton::Left)
+                => {
+                // check if the click was outside the message window
+                let x = mouse_event.column;
+                let y = mouse_event.row;
+                if !self.rect.contains(Position::new(x, y)) {
+                    self.should_render = false;
+                    self.handle_input = false;
+                }
+            }
+            _ => {}
+        }
+        // Set the mouse event to handled
+        return true;
     }
 }
