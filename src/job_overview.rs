@@ -18,10 +18,11 @@ pub struct JobOverview {
     pub should_render: bool,  // if the window should render
     pub handle_input: bool,   // if the window should handle input
     pub search_args: String,  // the search arguments for squeue
-    pub minimized: bool,      // if the job list is minimized
+    pub collapsed: bool,      // if the job list is collapsed
     pub focus: WindowFocus,   // which part of the window is in focus
     pub joblist: Vec<Job>,    // the list of jobs
     pub index: usize,         // the index of the job in focus
+    pub state: ListState,     // the state of the job list
 }
 
 // ====================================================================
@@ -30,14 +31,17 @@ pub struct JobOverview {
 
 impl JobOverview {
     pub fn new() -> Self {
+        let mut state = ListState::default();
+        state.select(Some(0));
         Self {
             should_render: true,
             handle_input: true,
             search_args: "-U u301533".to_string(),
-            minimized: false,
+            collapsed: false,
             focus: WindowFocus::JobDetails,
             joblist: vec![],
             index: 0,
+            state: state,
         }
     }
 }
@@ -48,12 +52,12 @@ impl JobOverview {
 // ====================================================================
 
 impl JobOverview {
-    pub fn render(&self, f: &mut Frame, area: &Rect) {
+    pub fn render(&mut self, f: &mut Frame, area: &Rect) {
         // only render if the window is active
         if !self.should_render { return; }
 
         let mut constraints = vec![Constraint::Length(1)];
-        if self.minimized {
+        if self.collapsed {
             constraints.push(Constraint::Length(1));
         } else {
             constraints.push(Constraint::Percentage(30));
@@ -81,14 +85,24 @@ impl JobOverview {
         );
     }
 
-    fn render_joblist(&self, f: &mut Frame, area: &Rect) {
-        if self.minimized {
-            let paragraph = Paragraph::new("▶ Job: ")
-                .style(Style::default().fg(Color::Gray));
-            f.render_widget(paragraph, *area);
-            return;
-        }
+    // ----------------------------------------------------------------------
+    // RENDERING THE JOB LIST
+    // ----------------------------------------------------------------------
 
+    fn render_joblist(&mut self, f: &mut Frame, area: &Rect) {
+        match self.collapsed {
+            true => self.render_joblist_collapsed(f, area),
+            false => self.render_joblist_extended(f, area),
+        }
+    }
+
+    fn render_joblist_collapsed(&self, f: &mut Frame, area: &Rect) {
+        let paragraph = Paragraph::new("▶ Job: ")
+            .style(Style::default().fg(Color::Gray));
+        f.render_widget(paragraph, *area);
+    }
+
+    fn render_joblist_extended(&mut self, f: &mut Frame, area: &Rect) {
         let title = format!("▼ Job list: squeue {}", self.search_args);
         
         let block = Block::default().title(title)
@@ -96,99 +110,43 @@ impl JobOverview {
             .border_type(BorderType::Rounded);
 
         f.render_widget(block.clone(), *area);
-        let _ = block.inner(*area);
 
-        let id_list = self.joblist.iter()
-            .map(|job| job.id.to_string()).collect::<Vec<String>>();
-        let id_len: u16 = id_list.iter()
-            .map(|id| id.len()).max().unwrap_or(0)
-            .max(8) as u16;
+        let id_list   = map2column(&self.joblist, |job| job.id.to_string());
+        let name_list = map2column(&self.joblist, |job| job.name.clone());
+        let stat_list = map2column(&self.joblist, |job| format_status(job));
+        let time_list = map2column(&self.joblist, |job| format_time(job));
+        let part_list = map2column(&self.joblist, |job| job.partition.clone());
+        let node_list = map2column(&self.joblist, |job| job.nodes.to_string());
 
-        let name_list = self.joblist.iter()
-            .map(|job| job.name.clone()).collect::<Vec<String>>();
-        let name_len: u16 = name_list.iter()
-            .map(|name| name.len()).max().unwrap_or(0)
-            .max(10) as u16;
-
-        let status_list = self.joblist.iter()
-            .map(|job| match job.status {
-                JobStatus::Unknown => "Unknown",
-                JobStatus::Running => "Running",
-                JobStatus::Pending => "Pending",
-                JobStatus::Completed => "Completed",
-                JobStatus::Failed => "Failed",
-            }).collect::<Vec<&str>>();
-        let status_len: u16 = status_list.iter()
-            .map(|status| status.len()).max().unwrap_or(0)
-            .max(11) as u16;
-
-        let time_list = self.joblist.iter()
-            .map(|job| {
-                let hours = job.time / 3600;
-                let minutes = (job.time % 3600) / 60;
-                let seconds = job.time % 60;
-                format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
-            }).collect::<Vec<String>>();
-        let time_len: u16 = time_list.iter()
-            .map(|time| time.len()).max().unwrap_or(0)
-            .max(10) as u16;
-
-        let partition_list = self.joblist.iter()
-            .map(|job| job.partition.clone()).collect::<Vec<String>>();
-        let partition_len: u16 = partition_list.iter()
-            .map(|partition| partition.len()).max().unwrap_or(0)
-            .max(11) as u16;
-
-        let nodes_list = self.joblist.iter()
-            .map(|job| job.nodes.to_string()).collect::<Vec<String>>();
-        let nodes_len: u16 = nodes_list.iter()
-            .map(|nodes| nodes.len()).max().unwrap_or(0)
-            .max(7) as u16;
+        let constraints = [
+            Constraint::Min(get_column_width(&id_list,   8)),
+            Constraint::Min(get_column_width(&name_list, 10)),
+            Constraint::Min(get_column_width(&stat_list, 8)),
+            Constraint::Min(get_column_width(&time_list, 6)),
+            Constraint::Min(get_column_width(&part_list, 11)),
+            Constraint::Min(get_column_width(&node_list, 7))
+        ];
 
         // create a layout for the job list
-        let list_layout = Layout::default()
+        let layout = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(id_len),
-                          Constraint::Min(name_len),
-                          Constraint::Min(status_len),
-                          Constraint::Min(time_len),
-                          Constraint::Min(partition_len),
-                          Constraint::Min(nodes_len)
-            ].as_ref())
+            .constraints(constraints.as_ref())
             .split(block.inner(*area));
 
-        // render the job list
-        let id_column = List::new(id_list)
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD)
-                             .bg(Color::Blue).fg(Color::Black));
-        let name_column = List::new(name_list)
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD)
-                             .bg(Color::Blue).fg(Color::Black));
-        let status_column = List::new(status_list)
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD)
-                             .bg(Color::Blue).fg(Color::Black));
-        let time_column = List::new(time_list)
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD)
-                             .bg(Color::Blue).fg(Color::Black));
-        let partition_column = List::new(partition_list)
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD)
-                             .bg(Color::Blue).fg(Color::Black));
-        let nodes_column = List::new(nodes_list)
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD)
-                             .bg(Color::Blue).fg(Color::Black));
+        let hc = get_job_color(&self.joblist[self.index]);
+        let state = &mut self.state;
 
-        // create the list state
-        let mut state = ListState::default();
-        state.select(Some(self.index));
-
-        f.render_stateful_widget(id_column, list_layout[0], &mut state);
-        f.render_stateful_widget(name_column, list_layout[1], &mut state);
-        f.render_stateful_widget(status_column, list_layout[2], &mut state);
-        f.render_stateful_widget(time_column, list_layout[3], &mut state);
-        f.render_stateful_widget(partition_column, list_layout[4], &mut state);
-        f.render_stateful_widget(nodes_column, list_layout[5], &mut state);
-
+        render_row(state, f, &layout[0], "ID", id_list, hc);
+        render_row(state, f, &layout[1], "Name", name_list, hc);
+        render_row(state, f, &layout[2], "Status", stat_list, hc);
+        render_row(state, f, &layout[3], "Time", time_list, hc);
+        render_row(state, f, &layout[4], "Partition", part_list, hc);
+        render_row(state, f, &layout[5], "Nodes", node_list, hc);
     }
+
+    // ----------------------------------------------------------------------
+    // RENDERING THE JOB DETAILS AND LOG SECTION
+    // ----------------------------------------------------------------------
 
     fn render_details(&self, f: &mut Frame, area: &Rect) {
         let mut title = vec!{
@@ -216,8 +174,83 @@ impl JobOverview {
         f.render_widget(block.clone(), *area);
         let _ = block.inner(*area);
     }
+
 }
 
+fn get_job_color(job: &Job) -> Color {
+    match job.status {
+        JobStatus::Running => Color::Green,
+        JobStatus::Pending => Color::Yellow,
+        JobStatus::Completed => Color::Gray,
+        JobStatus::Failed => Color::Red,
+        JobStatus::Unknown => Color::Red,
+    }
+}
+
+fn format_status(job: &Job) -> String {
+    match job.status {
+        JobStatus::Unknown => "Unknown",
+        JobStatus::Running => "Running",
+        JobStatus::Pending => "Pending",
+        JobStatus::Completed => "Completed",
+        JobStatus::Failed => "Failed",
+    }.to_string()
+}
+
+fn format_time(job: &Job) -> String {
+    let time = job.time;
+    let hours = time / 3600;
+    let minutes = (time % 3600) / 60;
+    let seconds = time % 60;
+    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+}
+
+fn get_column_width(column: &Vec<Line>, minimum: u16) -> u16 {
+    column.iter()
+        .map(|item| item.width()).max().unwrap_or(0)
+        .max(minimum.into()) as u16
+}
+
+fn map2column<F>(joblist: &Vec<Job>, map_fn: F) -> Vec<Line>
+where
+F: Fn(&Job) -> String,
+{
+    joblist.iter()
+        .map(|job| {
+            Line::styled(
+                map_fn(job), 
+                Style::default().fg(get_job_color(job)))
+                .alignment(Alignment::Right)
+        }).collect()
+}
+
+fn render_row(state: &mut ListState, 
+              f: &mut Frame, 
+              area: &Rect, title: &str, 
+              content: Vec<Line>,
+              highlight_color: Color) {
+    // create a bold styled centered title
+    let title = Span::styled(title, 
+                             Style::default().add_modifier(Modifier::BOLD));
+    let title = Paragraph::new(title)
+        .alignment(Alignment::Right);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(*area);
+
+    f.render_widget(title, layout[0]);
+
+    let item_list = List::new(content)
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD)
+                         .bg(highlight_color).fg(Color::Black));
+
+    // align the list to the right
+
+
+    f.render_stateful_widget(item_list, layout[1], state);
+}
 
 // ====================================================================
 //  USER INPUT
@@ -263,9 +296,9 @@ impl JobOverview {
             KeyCode::Char('a') => {
                 *action = Action::OpenJobAllocation;
             },
-            // Minimizing/Maximizing the joblist
+            // Collapsing/Extending the joblist
             KeyCode::Char('m') => {
-                self.minimized = !self.minimized;
+                self.collapsed = !self.collapsed;
             },
             _ => {return false;},
         };
@@ -299,6 +332,7 @@ impl JobOverview {
         if self.index >= self.joblist.len() {
             self.index = 0;
         }
+        self.state.select(Some(self.index));
     }
 
     fn prev_job(&mut self) {
@@ -307,5 +341,6 @@ impl JobOverview {
         } else {
             self.index = self.joblist.len() - 1;
         }
+        self.state.select(Some(self.index));
     }
 }

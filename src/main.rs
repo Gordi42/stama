@@ -19,14 +19,29 @@ pub mod message;
 use crate::job::{Job, JobStatus};
 
 fn main() -> Result<()> {
-    // Create an application.
+    // Create an application with 10 jobs.
     let mut app = App::new();
     app.job_overview.joblist
         .push(Job::new(1, "job1", JobStatus::Running, 10, "partition1", 1));
     app.job_overview.joblist
-        .push(Job::new(1, "job2", JobStatus::Pending, 235, "partition2", 2));
+        .push(Job::new(13, "job2", JobStatus::Pending, 235, "partition2", 2));
     app.job_overview.joblist
-        .push(Job::new(1, "job3", JobStatus::Completed, 5123, "partition3", 120));
+        .push(Job::new(15, "job3", JobStatus::Completed, 5123, "partition3", 120));
+    app.job_overview.joblist
+        .push(Job::new(12314, "job4", JobStatus::Failed, 123, "partition4", 1));
+    app.job_overview.joblist
+        .push(Job::new(133, "job5", JobStatus::Running, 10, "partition1", 1));
+    app.job_overview.joblist
+        .push(Job::new(1134, "job6", JobStatus::Pending, 235, "partition2", 2));
+    app.job_overview.joblist
+        .push(Job::new(2, "job7", JobStatus::Completed, 5123, "partition3", 120));
+    app.job_overview.joblist
+        .push(Job::new(194, "job8", JobStatus::Failed, 123, "partition4", 1));
+    app.job_overview.joblist
+        .push(Job::new(139, "job9", JobStatus::Running, 10, "partition1", 1));
+    app.job_overview.joblist
+        .push(Job::new(1123, "job10", JobStatus::Pending, 235, "partition2", 2));
+
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(std::io::stderr());
