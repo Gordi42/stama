@@ -43,7 +43,9 @@ fn main() -> Result<()> {
         .push(Job::new(139, "job9", JobStatus::Running, 10, "partition1", 1));
     app.job_overview.joblist
         .push(Job::new(1123, "job10", JobStatus::Pending, 235, "partition2", 2));
-
+    app.job_overview.sort();
+    app.job_overview.set_index(0);
+ 
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(std::io::stderr());

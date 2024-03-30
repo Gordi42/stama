@@ -7,6 +7,18 @@ pub enum JobStatus {
     Failed,
 }
 
+impl JobStatus {
+    pub fn priority(&self) -> usize {
+        match self {
+            JobStatus::Unknown => 0,
+            JobStatus::Pending => 1,
+            JobStatus::Running => 2,
+            JobStatus::Failed => 3,
+            JobStatus::Completed => 4,
+        }
+    }
+}
+
 pub struct Job {
     pub id: u32,            // the job id
     pub name: String,       // the name of the job

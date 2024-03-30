@@ -12,6 +12,7 @@ pub enum Action {
     OpenJobAllocation,
     OpenJobOverview,
     OpenMessage(Message),
+    SortJobList,
 }
 
 pub struct App {
@@ -54,6 +55,9 @@ impl App {
             }
             Action::OpenJobAllocation => {
                 self.message = Message::new("Opening job allocation not implemented");
+            }
+            Action::SortJobList => {
+                self.job_overview.sort();
             }
             _ => {}
         };

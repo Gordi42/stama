@@ -23,12 +23,25 @@ pub struct MouseAreas {
     pub bottom_symbol: Rect,
     pub log_title: Rect,
     pub joblist: Rect,
+    pub categories: Vec<Rect>,
+}
+
+#[derive(PartialEq)]
+pub enum SortCategory {
+    Id,
+    Name,
+    Status,
+    Time,
+    Partition,
+    Nodes,
 }
 
 pub struct JobOverview {
     pub should_render: bool,  // if the window should render
     pub handle_input: bool,   // if the window should handle input
     pub search_args: String,  // the search arguments for squeue
+    pub sort_category: SortCategory, // the category to sort 
+    pub reversed: bool,       // if the sorting is reversed
     pub collapsed_top: bool,  // if the job list is collapsed
     pub collapsed_bot: bool,  // if the job details are collapsed
     pub focus: WindowFocus,   // which part of the window is in focus
@@ -46,18 +59,65 @@ impl JobOverview {
     pub fn new() -> Self {
         let mut state = ListState::default();
         state.select(Some(0));
+        // create mouse areas with 6 categories
+        let mut mouse_areas = MouseAreas::default();
+        for _ in 0..6 {
+            mouse_areas.categories.push(Rect::default());
+        }
         Self {
             should_render: true,
             handle_input: true,
             search_args: "-U u301533".to_string(),
+            sort_category: SortCategory::Id,
+            reversed: false,
             collapsed_top: false,
             collapsed_bot: false,
             focus: WindowFocus::JobDetails,
             joblist: vec![],
             index: 0,
             state: state,
-            mouse_areas: MouseAreas::default(),
+            mouse_areas: mouse_areas,
         }
+    }
+}
+
+// ====================================================================
+//  Sorting the job list
+// ====================================================================
+impl JobOverview {
+    pub fn sort(&mut self) {
+        // get the id of the job in focus
+        let id = self.joblist[self.index].id;
+        // sort the job list
+        match self.sort_category {
+            SortCategory::Id => {
+                self.joblist.sort_by(|a, b| b.id.cmp(&a.id));
+            },
+            SortCategory::Name => {
+                self.joblist.sort_by(|a, b| a.name.cmp(&b.name));
+            },
+            SortCategory::Status => {
+                self.joblist.sort_by(|a, b| 
+                                     a.status.priority().cmp(
+                                     &b.status.priority()));
+            },
+            SortCategory::Time => {
+                self.joblist.sort_by(|a, b| a.time.cmp(&b.time));
+            },
+            SortCategory::Partition => {
+                self.joblist.sort_by(|a, b| a.partition.cmp(&b.partition));
+            },
+            SortCategory::Nodes => {
+                self.joblist.sort_by(|a, b| a.nodes.cmp(&b.nodes));
+            },
+        }
+        // reverse the list if needed
+        if self.reversed {
+            self.joblist.reverse();
+        }
+        // get the index of the job in focus
+        let index = self.joblist.iter().position(|job| job.id == id);
+        self.set_index(index.unwrap_or(0) as i32);
     }
 }
 
@@ -144,6 +204,11 @@ impl JobOverview {
             .direction(Direction::Horizontal)
             .constraints::<Vec<Constraint>>(constraints)
             .split(*area);
+        
+        // update the mouse areas of the categories
+        for category in self.mouse_areas.categories.iter_mut() {
+            *category = Rect::default();
+        }
 
         content_strings.iter().enumerate().for_each(|(i, s)| {
             let line = Line::from(s.clone()).
@@ -192,15 +257,40 @@ impl JobOverview {
             .constraints(constraints.as_ref())
             .split(block.inner(*area));
 
+        // update the mouse areas of the categories
+        for (i, area) in layout.iter().enumerate() {
+            let mut cat_area = area.clone();
+            cat_area.height = 1;
+            self.mouse_areas.categories[i] = cat_area;
+        }
+
         let hc = get_job_color(&self.joblist[self.index]);
         let state = &mut self.state;
+        
+        let mut title_names = vec!["ID", "Name", "Status", 
+                               "Time", "Partition", "Nodes"];
+        // modify the title names if the category is selected
+        let cat_ind = match self.sort_category {
+            SortCategory::Id => 0,
+            SortCategory::Name => 1,
+            SortCategory::Status => 2,
+            SortCategory::Time => 3,
+            SortCategory::Partition => 4,
+            SortCategory::Nodes => 5,
+        };
+        let new_title = format!("{} {}", 
+                           title_names[cat_ind],
+                           if self.reversed { "▲" } else { "▼" });
+        title_names[cat_ind] = new_title.as_str();
 
-        render_row(state, f, &layout[0], "ID", id_list, hc);
-        render_row(state, f, &layout[1], "Name", name_list, hc);
-        render_row(state, f, &layout[2], "Status", stat_list, hc);
-        render_row(state, f, &layout[3], "Time", time_list, hc);
-        render_row(state, f, &layout[4], "Partition", part_list, hc);
-        render_row(state, f, &layout[5], "Nodes", node_list, hc);
+        let row_lists = vec![id_list, name_list, stat_list, 
+                             time_list, part_list, node_list];
+
+        for i in 0..6 {
+            render_row(state, f, &layout[i], title_names[i], 
+                       row_lists[i].clone(), hc);
+        }
+
     }
 
     // ----------------------------------------------------------------------
@@ -452,7 +542,7 @@ impl JobOverview {
         self.set_index(self.index as i32 - 1);
     }
 
-    fn set_index(&mut self, index: i32) {
+    pub fn set_index(&mut self, index: i32) {
         let job_len = self.joblist.len() as i32;
         let mut new_index = index;
         if index >= job_len {
@@ -483,6 +573,29 @@ impl JobOverview {
                     if self.mouse_areas.joblist_title.contains(mouse_pos) {
                         self.collapsed_top = !self.collapsed_top;
                         mouse_input.click();
+                    }
+                    // joblist categories
+                    for (i, category) in self.mouse_areas
+                                             .categories.iter().enumerate() {
+                        if category.contains(mouse_pos) {
+                            let new_cat = match i {
+                                0 => SortCategory::Id,
+                                1 => SortCategory::Name,
+                                2 => SortCategory::Status,
+                                3 => SortCategory::Time,
+                                4 => SortCategory::Partition,
+                                5 => SortCategory::Nodes,
+                                _ => SortCategory::Id,
+                            };
+                            // reverse sorting if same category is selected
+                            if new_cat == self.sort_category {
+                                self.reversed = !self.reversed;
+                            } else {
+                                self.sort_category = new_cat;
+                            };
+                            *action = Action::SortJobList;
+                            mouse_input.click();
+                        }
                     }
                     // joblist entries
                     if self.mouse_areas.joblist.contains(mouse_pos) {
