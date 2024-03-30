@@ -16,6 +16,7 @@ pub mod update;
 pub mod mouse_input;
 pub mod job;
 pub mod job_overview;
+pub mod job_actions;
 pub mod message;
 
 use crate::job::{Job, JobStatus};

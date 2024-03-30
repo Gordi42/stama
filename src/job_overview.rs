@@ -89,8 +89,9 @@ impl JobOverview {
 }
 
 // ====================================================================
-//  Sorting the job list
+//  METHODS
 // ====================================================================
+
 impl JobOverview {
     pub fn sort(&mut self) {
         // get the id of the job in focus
@@ -125,6 +126,10 @@ impl JobOverview {
         // get the index of the job in focus
         let index = self.joblist.iter().position(|job| job.id == id);
         self.set_index(index.unwrap_or(0) as i32);
+    }
+
+    pub fn get_job(&self) -> &Job {
+        &self.joblist[self.index]
     }
 }
 
