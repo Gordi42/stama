@@ -94,6 +94,8 @@ impl JobOverview {
 
 impl JobOverview {
     pub fn sort(&mut self) {
+        // only sort if there are jobs
+        if self.joblist.is_empty() { return; }
         // get the id of the job in focus
         let id = self.joblist[self.index].id;
         // sort the job list
@@ -130,6 +132,17 @@ impl JobOverview {
 
     pub fn get_job(&self) -> &Job {
         &self.joblist[self.index]
+    }
+
+    pub fn get_jobname(&self) -> Option<String> {
+        if self.joblist.is_empty() {
+            return None;
+        }
+        Some(self.joblist[self.index].name.clone())
+    }
+
+    pub fn get_squeue_command(&self) -> String {
+        self.squeue_command.lines().join("\n")
     }
 }
 
@@ -195,6 +208,12 @@ impl JobOverview {
         self.mouse_areas.joblist_title = area.clone();
         self.mouse_areas.joblist = Rect::default();
 
+        if self.joblist.is_empty() {
+            let title = format!("▶ Job list (collapsed)");
+            f.render_widget(Line::from(title), *area);
+            return;
+        }
+
         let job = &self.joblist[self.index];
         let col = get_job_color(job);
 
@@ -248,12 +267,18 @@ impl JobOverview {
 
         f.render_widget(block.clone(), *area);
 
+
         // render the squeue command
-        let buffer = self.squeue_command.lines().join("\n");
+        let buffer = self.get_squeue_command();
         let mut squeue_rect = top_row.clone();
         squeue_rect.width = buffer.len() as u16 + 1;
         squeue_rect.x = title_len - 1;
         self.render_squeue_command(f, &squeue_rect);
+
+        if self.joblist.is_empty() {
+            self.render_empty_joblist(f, &joblist_area);
+            return;
+        }
 
         let id_list   = map2column(&self.joblist, |job| job.id.to_string());
         let name_list = map2column(&self.joblist, |job| job.name.clone());
@@ -325,6 +350,14 @@ impl JobOverview {
             textarea.set_cursor_style(Style::default());
         }
         f.render_widget(textarea.widget(), *area);
+    }
+
+    fn render_empty_joblist(&self, f: &mut Frame, area: &Rect) {
+        let text = "No jobs found";
+        let text = Span::styled(text, Style::default().fg(Color::Gray));
+        let paragraph = Paragraph::new(text)
+            .alignment(Alignment::Center);
+        f.render_widget(paragraph, *area);
     }
 
     // ----------------------------------------------------------------------

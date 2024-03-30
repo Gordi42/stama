@@ -45,6 +45,7 @@ fn main() -> Result<()> {
     app.job_overview.joblist
         .push(Job::new(1123, "job10", JobStatus::Pending, 235, "partition2", 2));
     app.job_overview.sort();
+    let mut app = App::new();
     app.job_overview.set_index(0);
  
 

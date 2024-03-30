@@ -55,8 +55,14 @@ impl App {
                 self.message = Message::new("Opening job overview not implemented");
             }
             Action::OpenJobAction => {
-                let job_name = self.job_overview.get_job().name.clone();
-                self.job_actions_menu.activate(&job_name);
+                match self.job_overview.get_jobname() {
+                    Some(job_name) => {
+                        self.job_actions_menu.activate(&job_name);
+                    }
+                    None => {
+                        self.message = Message::new("No job selected");
+                    }
+                }
             }
             Action::OpenJobAllocation => {
                 self.message = Message::new("Opening job allocation not implemented");
