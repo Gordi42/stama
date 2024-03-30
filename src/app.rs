@@ -1,6 +1,6 @@
 use crate::{
     job_overview::JobOverview,
-    message::Message,
+    message::{Message, MessageKind},
     mouse_input::MouseInput,};
 use crate::job_actions::{JobActionsMenu, JobActions};
 
@@ -61,6 +61,7 @@ impl App {
                     }
                     None => {
                         self.message = Message::new("No job selected");
+                        self.message.kind = MessageKind::Error;
                     }
                 }
             }

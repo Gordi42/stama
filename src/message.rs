@@ -10,14 +10,21 @@ use crossterm::event::{
 use crate::app::Action;
 use crate::mouse_input::MouseInput;
 
+#[derive(Debug, Clone, Copy)]
+pub enum MessageKind {
+    Info,
+    Warning,
+    Error,
+}
+
 #[derive(Debug, Clone)]
 pub struct Message {
     pub should_render: bool,
     pub handle_input: bool,
     pub text: String,
-    pub color: Color,
     pub height: u16,
     pub rect: Rect,
+    pub kind: MessageKind,
 }
 
 // ====================================================================
@@ -30,9 +37,9 @@ impl Message {
             should_render: true,
             handle_input: true,
             text: text.to_string(),
-            color: Color::Yellow,
             height: 2,
             rect: Rect::default(),
+            kind: MessageKind::Info,
         }
     }
 
@@ -41,9 +48,9 @@ impl Message {
             should_render: false,
             handle_input: false,
             text: "".to_string(),
-            color: Color::Yellow,
             height: 2,
             rect: Rect::default(),
+            kind: MessageKind::Info,
         }
     }
 }
@@ -65,11 +72,23 @@ impl Message {
         let [rect] = horizontal.areas(rect);
         self.rect = rect;
 
+        let color = match self.kind {
+            MessageKind::Info => Color::Blue,
+            MessageKind::Warning => Color::Yellow,
+            MessageKind::Error => Color::Red,
+        };
+
+        let title = match self.kind {
+            MessageKind::Info => "Info",
+            MessageKind::Warning => "Warning",
+            MessageKind::Error => "Error",
+        };
+
         let paragraph = Paragraph::new(self.text.clone())
-            .style(Style::default().fg(self.color))
+            .style(Style::default().fg(color))
             .block(Block::default()
                    .borders(Borders::ALL)
-                   .title("Message")
+                   .title(title)
                    .border_type(BorderType::Rounded)
                    .title(block::Title::from("<Esc> to close")
                           .alignment(Alignment::Right)));
