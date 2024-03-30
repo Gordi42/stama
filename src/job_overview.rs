@@ -3,15 +3,25 @@ use ratatui::{
     style::{Color, Style},
     widgets::*,
 };
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, MouseEventKind, MouseButton,};
 
 use crate::app::Action;
 use crate::job::{Job, JobStatus};
+use crate::mouse_input::MouseInput;
 
 
 pub enum WindowFocus {
     JobDetails,
     Log,
+}
+
+#[derive(Default)]
+pub struct MouseAreas {
+    pub joblist_title: Rect,
+    pub details_title: Rect,
+    pub log_title: Rect,
+    pub joblist: Rect,
 }
 
 pub struct JobOverview {
@@ -23,6 +33,7 @@ pub struct JobOverview {
     pub joblist: Vec<Job>,    // the list of jobs
     pub index: usize,         // the index of the job in focus
     pub state: ListState,     // the state of the job list
+    pub mouse_areas: MouseAreas, // the mouse areas of the window
 }
 
 // ====================================================================
@@ -42,6 +53,7 @@ impl JobOverview {
             joblist: vec![],
             index: 0,
             state: state,
+            mouse_areas: MouseAreas::default(),
         }
     }
 }
@@ -96,7 +108,11 @@ impl JobOverview {
         }
     }
 
-    fn render_joblist_collapsed(&self, f: &mut Frame, area: &Rect) {
+    fn render_joblist_collapsed(&mut self, f: &mut Frame, area: &Rect) {
+        // update the mouse areas
+        self.mouse_areas.joblist_title = area.clone();
+        self.mouse_areas.joblist = Rect::default();
+
         let job = &self.joblist[self.index];
         let col = get_job_color(job);
 
@@ -132,6 +148,15 @@ impl JobOverview {
         let block = Block::default().title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded);
+
+        // update the mouse areas
+        let mut top_row = area.clone();
+        top_row.height = 1;
+        self.mouse_areas.joblist_title = top_row;
+        let mut joblist_area = block.inner(*area).clone();
+        joblist_area.y += 1;       // remove the header row
+        joblist_area.height -= 1;
+        self.mouse_areas.joblist = joblist_area;
 
         f.render_widget(block.clone(), *area);
 
@@ -352,19 +377,22 @@ impl JobOverview {
     }
 
     fn next_job(&mut self) {
-        self.index += 1;
-        if self.index >= self.joblist.len() {
-            self.index = 0;
-        }
-        self.state.select(Some(self.index));
+        self.set_index(self.index as i32 + 1);
     }
 
     fn prev_job(&mut self) {
-        if self.index > 0 {
-            self.index -= 1;
-        } else {
-            self.index = self.joblist.len() - 1;
-        }
+        self.set_index(self.index as i32 - 1);
+    }
+
+    fn set_index(&mut self, index: i32) {
+        let job_len = self.joblist.len() as i32;
+        let mut new_index = index;
+        if index >= job_len {
+            new_index = 0;
+        } else if index < 0 {
+            new_index = job_len - 1;
+        } 
+        self.index = new_index as usize;
         self.state.select(Some(self.index));
     }
 }
@@ -374,15 +402,40 @@ impl JobOverview {
 // ====================================================================
 
 impl JobOverview {
-    pub fn mouse_input(&mut self, _action: &Action, _mouse_event: MouseEvent) { 
-        if !self.handle_input { return; }
+    pub fn mouse_input(
+        &mut self, action: &mut Action, mouse_input: &mut MouseInput,) { 
 
-        // check if the mouse event is a scroll event
-        if _mouse_event.kind == MouseEventKind::ScrollDown {
-            self.next_job();
-        } else if _mouse_event.kind == MouseEventKind::ScrollUp {
-            self.prev_job();
+        if !self.handle_input { return; }
+        let mouse_pos = mouse_input.get_position();
+
+        if let Some(event_kind) = mouse_input.kind() {
+            match event_kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if self.mouse_areas.joblist_title.contains(mouse_pos) {
+                        self.collapsed = !self.collapsed;
+                    }
+                    if self.mouse_areas.joblist.contains(mouse_pos) {
+                        let rel_y = mouse_pos.y - self.mouse_areas.joblist.y;
+                        let new_index = rel_y as i32 + self.state.offset() as i32;
+                        self.set_index(new_index);
+                        if mouse_input.is_double_click() {
+                            *action = Action::OpenJobAction;
+                        }
+                        mouse_input.click();
+                    }
+                },
+                MouseEventKind::ScrollDown => {
+                    self.next_job();
+                },
+                MouseEventKind::ScrollUp => {
+                    self.prev_job();
+                },
+                _ => {},
+            }
         }
+
+
 
     }
 }
+

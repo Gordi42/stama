@@ -1,13 +1,77 @@
-use crossterm::event::MouseEvent;
+use crossterm::event::{MouseEventKind, MouseEvent};
+use std::time::SystemTime;
+use ratatui::layout::Position;
 
 use crate::app::App;
 
+pub struct MouseInput {
+    pub event: Option<MouseEvent>,
+    pub handled: bool,
+    last_click_time: SystemTime,
+    last_click_pos: Position,
+}
+
+impl MouseInput {
+    pub fn new() -> Self {
+        Self {
+            event: None,
+            handled: false,
+            last_click_time: SystemTime::now(),
+            last_click_pos: Position::new(0, 0),
+        }
+    }
+
+    pub fn is_double_click(&mut self) -> bool {
+        // first check if the click is in the same position
+        if self.last_click_pos != self.get_position() {
+            return false;
+        }
+
+        let now = SystemTime::now();
+        let duration = now.duration_since(self.last_click_time)
+            .unwrap_or(std::time::Duration::from_secs(60));
+        if duration.as_millis() < 500 {
+            self.last_click_time = now;
+            return true;
+        }
+        false
+    }
+
+    pub fn get_position(&self) -> Position {
+        if let Some(event) = self.event {
+            return Position::new(event.column, event.row);
+        } else {
+            return Position::new(0, 0);
+        }
+    }
+
+    pub fn click(&mut self) {
+        self.last_click_time = SystemTime::now();
+        self.last_click_pos = self.get_position();
+        self.handled = true;
+    }
+
+    pub fn kind(&self) -> Option<MouseEventKind> {
+        if self.handled {
+            None
+        } else {
+            if let Some(event) = &self.event {
+                Some(event.kind)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+
 pub fn mouse_input(app: &mut App, mouse_event: MouseEvent) {
-    let mut input_handled = false;
-    if !input_handled {
-        input_handled = app.message.mouse_input(&mut app.action, mouse_event);
-    }
-    if !input_handled {
-        app.job_overview.mouse_input(&mut app.action, mouse_event);
-    }
+    app.mouse_input.handled = false;
+    app.mouse_input.event = Some(mouse_event);
+
+    app.message.mouse_input(&mut app.action, &mut app.mouse_input);
+
+    app.job_overview.mouse_input(&mut app.action, &mut app.mouse_input);
+
+    app.handle_action();
 }

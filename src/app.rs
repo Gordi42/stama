@@ -1,6 +1,7 @@
 use crate::{
     job_overview::JobOverview,
-    message::Message,};
+    message::Message,
+    mouse_input::MouseInput,};
 
 #[derive(Debug, Default)]
 pub enum Action {
@@ -19,6 +20,7 @@ pub struct App {
     pub should_redraw: bool,
     pub job_overview: JobOverview,
     pub message: Message,
+    pub mouse_input: MouseInput,
 }
 
 impl App {
@@ -29,6 +31,7 @@ impl App {
             should_redraw: true,
             job_overview: JobOverview::new(),
             message: Message::new_disabled(),
+            mouse_input: MouseInput::new(),
         }
     }
 

@@ -2,12 +2,13 @@ use ratatui::{
     prelude::*,
     style::{Color, Style},
     widgets::*,
-    layout::{Layout, Flex, Position,},
+    layout::{Layout, Flex,},
 };
 use crossterm::event::{
-    KeyCode, KeyEvent, MouseEvent, MouseButton, MouseEventKind};
+    KeyCode, KeyEvent, MouseButton, MouseEventKind};
 
 use crate::app::Action;
+use crate::mouse_input::MouseInput;
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -106,23 +107,22 @@ impl Message {
 impl Message {
     pub fn mouse_input(&mut self, 
                        _action: &mut Action, 
-                       mouse_event: MouseEvent) -> bool {
-        if !self.handle_input { return false; }
+                       mouse_input: &mut MouseInput) {
+        if !self.handle_input { return;}
 
-        match mouse_event.kind {
-            MouseEventKind::Down(MouseButton::Left)
-                => {
-                // check if the click was outside the message window
-                let x = mouse_event.column;
-                let y = mouse_event.row;
-                if !self.rect.contains(Position::new(x, y)) {
-                    self.should_render = false;
-                    self.handle_input = false;
+        if let Some(mouse_event_kind) = mouse_input.kind() {
+
+            match mouse_event_kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if !self.rect.contains(mouse_input.get_position()) {
+                        self.should_render = false;
+                        self.handle_input = false;
+                    }
                 }
+                _ => {}
             }
-            _ => {}
+            // Set the mouse event to handled
+            mouse_input.click();
         }
-        // Set the mouse event to handled
-        return true;
     }
 }
