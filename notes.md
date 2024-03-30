@@ -32,6 +32,8 @@
 ## Controls
 - Down/Up (j/k): Next/Previous job
 - Enter (l): Open job actions menu
+- tab: Switch between sorting option
+- r: reverse sorting order
 - Left/Right: Switch focus between job details and log
 - 1: Focus on job details
 - 2: Focus on log

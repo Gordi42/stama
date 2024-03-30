@@ -473,6 +473,15 @@ impl JobOverview {
             KeyCode::Enter | KeyCode::Char('l') => {
                 *action = Action::OpenJobAction;
             },
+            // Change sorting category
+            KeyCode::Tab => {
+                self.next_sort_category();
+                *action = Action::SortJobList;
+            },
+            KeyCode::Char('r') => {
+                self.reversed = !self.reversed;
+                *action = Action::SortJobList;
+            },
             // Switching focus between job details and log
             KeyCode::Char('1') => {
                 self.select_details();
@@ -553,6 +562,29 @@ impl JobOverview {
         self.index = new_index as usize;
         self.state.select(Some(self.index));
     }
+
+    fn next_sort_category(&mut self) {
+        match self.sort_category {
+            SortCategory::Id => {
+                self.sort_category = SortCategory::Name;
+            },
+            SortCategory::Name => {
+                self.sort_category = SortCategory::Status;
+            },
+            SortCategory::Status => {
+                self.sort_category = SortCategory::Time;
+            },
+            SortCategory::Time => {
+                self.sort_category = SortCategory::Partition;
+            },
+            SortCategory::Partition => {
+                self.sort_category = SortCategory::Nodes;
+            },
+            SortCategory::Nodes => {
+                self.sort_category = SortCategory::Id;
+            },
+        }
+    }
 }
 
 // ====================================================================
@@ -600,7 +632,8 @@ impl JobOverview {
                     // joblist entries
                     if self.mouse_areas.joblist.contains(mouse_pos) {
                         let rel_y = mouse_pos.y - self.mouse_areas.joblist.y;
-                        let new_index = rel_y as i32 + self.state.offset() as i32;
+                        let mut new_index = rel_y as i32 + self.state.offset() as i32;
+                        new_index = new_index.min(self.joblist.len() as i32 - 1);
                         self.set_index(new_index);
                         if mouse_input.is_double_click() {
                             *action = Action::OpenJobAction;
