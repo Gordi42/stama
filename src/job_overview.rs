@@ -97,9 +97,33 @@ impl JobOverview {
     }
 
     fn render_joblist_collapsed(&self, f: &mut Frame, area: &Rect) {
-        let paragraph = Paragraph::new("▶ Job: ")
-            .style(Style::default().fg(Color::Gray));
-        f.render_widget(paragraph, *area);
+        let job = &self.joblist[self.index];
+        let col = get_job_color(job);
+
+        let content_strings = vec![
+            "▶ Job: ".to_string(),
+            job.id.to_string(),
+            job.name.clone(),
+            format_status(job),
+            format_time(job),
+            job.partition.clone(),
+            job.nodes.to_string(),
+        ];
+
+        let constraints = content_strings.iter()
+            .map(|s| Constraint::Min(s.len() as u16 + 2))
+            .collect::<Vec<Constraint>>();
+
+        let layout = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints::<Vec<Constraint>>(constraints)
+            .split(*area);
+
+        content_strings.iter().enumerate().for_each(|(i, s)| {
+            let line = Line::from(s.clone()).
+                style(Style::default().fg(col));
+            f.render_widget(line, layout[i]);
+        });
     }
 
     fn render_joblist_extended(&mut self, f: &mut Frame, area: &Rect) {
