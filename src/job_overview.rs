@@ -5,6 +5,7 @@ use ratatui::{
 };
 use crossterm::event::{
     KeyCode, KeyEvent, MouseEventKind, MouseButton,};
+use tui_textarea::{TextArea, CursorMove};
 
 use crate::app::Action;
 use crate::job::{Job, JobStatus};
@@ -49,6 +50,8 @@ pub struct JobOverview {
     pub index: usize,         // the index of the job in focus
     pub state: ListState,     // the state of the job list
     pub mouse_areas: MouseAreas, // the mouse areas of the window
+    pub squeue_command: TextArea<'static>, // the squeue command
+    pub edit_squeue: bool,    // if the squeue command is being edited
 }
 
 // ====================================================================
@@ -64,6 +67,8 @@ impl JobOverview {
         for _ in 0..6 {
             mouse_areas.categories.push(Rect::default());
         }
+        let mut textarea = TextArea::from(["squeue -U u301533"]);
+        textarea.move_cursor(CursorMove::End);
         Self {
             should_render: true,
             handle_input: true,
@@ -77,6 +82,8 @@ impl JobOverview {
             index: 0,
             state: state,
             mouse_areas: mouse_areas,
+            squeue_command: textarea,
+            edit_squeue: false,
         }
     }
 }
@@ -218,7 +225,8 @@ impl JobOverview {
     }
 
     fn render_joblist_extended(&mut self, f: &mut Frame, area: &Rect) {
-        let title = format!("▼ Job list: squeue {}", self.search_args);
+        let title = "▼ Job list: ";
+        let title_len = title.len() as u16;
         
         let block = Block::default().title(title)
             .borders(Borders::ALL)
@@ -234,6 +242,13 @@ impl JobOverview {
         self.mouse_areas.joblist = joblist_area;
 
         f.render_widget(block.clone(), *area);
+
+        // render the squeue command
+        let buffer = self.squeue_command.lines().join("\n");
+        let mut squeue_rect = top_row.clone();
+        squeue_rect.width = buffer.len() as u16 + 1;
+        squeue_rect.x = title_len - 1;
+        self.render_squeue_command(f, &squeue_rect);
 
         let id_list   = map2column(&self.joblist, |job| job.id.to_string());
         let name_list = map2column(&self.joblist, |job| job.name.clone());
@@ -291,6 +306,20 @@ impl JobOverview {
                        row_lists[i].clone(), hc);
         }
 
+    }
+
+    fn render_squeue_command(&mut self, f: &mut Frame, area: &Rect) {
+        let textarea = &mut self.squeue_command;
+        if self.edit_squeue {
+            textarea.set_cursor_style(Style::default().bg(Color::Red));
+            textarea.set_cursor_line_style(
+                Style::default().fg(Color::Red)
+                .add_modifier(Modifier::BOLD));
+        } else {
+            textarea.set_cursor_line_style(Style::default());
+            textarea.set_cursor_style(Style::default());
+        }
+        f.render_widget(textarea.widget(), *area);
     }
 
     // ----------------------------------------------------------------------
@@ -457,6 +486,20 @@ impl JobOverview {
     pub fn input(&mut self, action: &mut Action, key_event: KeyEvent)
         -> bool {
         if !self.handle_input { return false; }
+
+        if self.edit_squeue {
+            match key_event.code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.edit_squeue = false;
+                    return true;
+                },
+                _ => {
+                    self.squeue_command.input(key_event);
+                    return true;
+                },
+            }
+        }
+
         match key_event.code {
             // Escaping the program
             KeyCode::Char('q') => {
@@ -505,6 +548,11 @@ impl JobOverview {
             },
             KeyCode::Char('n') => {
                 self.collapsed_bot = !self.collapsed_bot;
+            },
+            // Edit the squeue command
+            KeyCode::Char('/') => {
+                self.collapsed_top = false;
+                self.edit_squeue = true;
             },
             _ => {return false;},
         };
@@ -599,6 +647,11 @@ impl JobOverview {
         let mouse_pos = mouse_input.get_position();
 
         if let Some(event_kind) = mouse_input.kind() {
+            if self.edit_squeue {
+                self.edit_squeue = false;
+                return;
+            }
+
             match event_kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     // joblist title
