@@ -1,3 +1,5 @@
+use std::process::Command;
+
 use crate::{
     job_overview::JobOverview,
     message::{Message, MessageKind},
@@ -6,6 +8,7 @@ use crate::job_actions::{JobActionsMenu, JobActions};
 use crate::user_options::UserOptions;
 use crate::user_options_menu::UserOptionsMenu;
 use crate::confirmation::Confirmation;
+use crate::job::Job;
 
 #[derive(Debug, Default, Clone)]
 pub enum Action {
@@ -123,15 +126,13 @@ impl App {
     }
 
     fn open_job_action(&mut self) {
-        match self.job_overview.get_jobname() {
-            Some(job_name) => {
-                self.job_actions_menu.activate(&job_name);
-            }
-            None => {
-                self.message = Message::new("No job selected");
-                self.message.kind = MessageKind::Error;
-            }
+        if self.job_overview.joblist.is_empty() {
+            self.message = Message::new("No jobs to select");
+            self.message.kind = MessageKind::Error;
+            return;
         }
+        let job = self.job_overview.get_job();
+        self.job_actions_menu.activate(&job);
     }
 
     fn open_job_allocation(&mut self) {
@@ -150,10 +151,59 @@ impl App {
 
     fn handle_job_action(&mut self, action: JobActions) {
         match action {
-            _ => {
-                self.message = Message::new("Job action not implemented");
+            JobActions::Kill(job) => self.open_kill_confirmation(&job),
+            JobActions::KillConfirmed(job) => self.kill_job(&job),
+            JobActions::OpenLog(_) => self.open_log(),
+            JobActions::OpenSubmission(_) => self.open_submissions(),
+            JobActions::GoWorkDir(_) => self.go_workdir(),
+            JobActions::SSH(_) => self.ssh_to_node(),
+        }
+    }
+
+    fn open_kill_confirmation(&mut self, job: &Job) {
+        if self.user_options.confirm_before_kill {
+            let job_name = job.get_jobname();
+            let msg = format!("Kill job {} ({})?", job_name, job.id);
+            self.confirmation = Confirmation::new(
+                &msg, Action::JobOption(
+                    JobActions::KillConfirmed(job.clone())));
+        } else {
+            self.kill_job(job);
+        }
+    }
+
+    fn kill_job(&mut self, job: &Job) {
+        let command = format!("scancel {}", job.id);
+        let command_status = Command::new("scancel")
+            .arg(job.id.to_string())
+            .output();
+        match command_status {
+            Ok(_) => {
+                self.message = Message::new("Job killed");
+            }
+            Err(e) => {
+                self.message = Message::new(&format!("Error killing job: {}", e));
+                self.message.kind = MessageKind::Error;
             }
         }
     }
+
+    fn open_log(&mut self) {
+        self.message = Message::new("Opening log not implemented");
+    }
+
+    fn open_submissions(&mut self) {
+        self.message = Message::new("Opening submissions not implemented");
+    }
+
+    fn go_workdir(&mut self) {
+        self.message = Message::new("Opening workdir not implemented");
+    }
+
+    fn ssh_to_node(&mut self) {
+        self.message = Message::new("SSH to node not implemented");
+    }
+
+
 
 }

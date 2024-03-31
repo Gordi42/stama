@@ -137,12 +137,12 @@ impl JobOverview {
         &self.joblist[self.index]
     }
 
-    pub fn get_jobname(&self) -> Option<String> {
-        if self.joblist.is_empty() {
-            return None;
-        }
-        Some(self.joblist[self.index].name.clone())
-    }
+    // pub fn get_jobname(&self) -> Option<String> {
+    //     if self.joblist.is_empty() {
+    //         return None;
+    //     }
+    //     Some(self.joblist[self.index].name.clone())
+    // }
 
     pub fn get_squeue_command(&self) -> String {
         self.squeue_command.lines().join("\n")

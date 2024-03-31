@@ -1,5 +1,7 @@
 
+#[derive(Debug, Clone, Default)]
 pub enum JobStatus {
+    #[default]
     Unknown,
     Running,
     Pending,
@@ -19,6 +21,7 @@ impl JobStatus {
     }
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct Job {
     pub id: u32,            // the job id
     pub name: String,       // the name of the job
@@ -42,6 +45,16 @@ impl Job {
             partition: partition.to_string(),
             nodes,
         }
+    }
+}
+
+// ====================================================================
+// METHODS
+// ====================================================================
+
+impl Job {
+    pub fn get_jobname(&self) -> String {
+        self.name.clone()
     }
 }
 

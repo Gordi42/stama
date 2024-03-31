@@ -122,7 +122,8 @@ impl Confirmation {
 
         let outer_layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1),
+            .constraints([Constraint::Length(1),
+                          Constraint::Min(1),
                           Constraint::Length(3)])
             .split(border.inner(rect));
 
@@ -131,7 +132,7 @@ impl Confirmation {
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
 
-        f.render_widget(text, outer_layout[0]);
+        f.render_widget(text, outer_layout[1]);
 
         let buttons_layout = Layout::default()
             .direction(Direction::Horizontal)
@@ -140,7 +141,7 @@ impl Confirmation {
                           Constraint::Length(3),
                           Constraint::Length(10),
                             Constraint::Min(0)])
-            .split(outer_layout[1]);
+            .split(outer_layout[2]);
 
         self.yes_rect = buttons_layout[1];
         self.no_rect = buttons_layout[3];

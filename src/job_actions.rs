@@ -8,14 +8,16 @@ use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use crate::mouse_input::MouseInput;
 
 use crate::app::Action;
+use crate::job::Job;
 
 #[derive(Clone, Debug)]
 pub enum JobActions {
-    Kill,
-    OpenLog,
-    OpenSubmission,
-    GoWorkDir,
-    SSH,
+    Kill(Job),
+    KillConfirmed(Job),
+    OpenLog(Job),
+    OpenSubmission(Job),
+    GoWorkDir(Job),
+    SSH(Job),
 }
 
 pub struct JobActionsMenu {
@@ -35,12 +37,13 @@ pub struct JobActionsMenu {
 
 impl JobActionsMenu {
     pub fn new() -> Self {
+        let job = Job::default();
         let actions = vec![
-            JobActions::Kill,
-            JobActions::OpenLog,
-            JobActions::OpenSubmission,
-            JobActions::GoWorkDir,
-            JobActions::SSH,
+            JobActions::Kill(job.clone()),
+            JobActions::OpenLog(job.clone()),
+            JobActions::OpenSubmission(job.clone()),
+            JobActions::GoWorkDir(job.clone()),
+            JobActions::SSH(job.clone()),
         ];
         let mut labels = vec![
             "Kill job".to_string(),
@@ -69,6 +72,17 @@ impl JobActionsMenu {
 // ========================================================================
 
 impl JobActionsMenu {
+
+    pub fn set_job(&mut self, job: Job) {
+        self.actions = vec![
+            JobActions::Kill(job.clone()),
+            JobActions::OpenLog(job.clone()),
+            JobActions::OpenSubmission(job.clone()),
+            JobActions::GoWorkDir(job.clone()),
+            JobActions::SSH(job.clone()),
+        ];
+        self.job_name = job.get_jobname();
+    }
 
     pub fn set_index(&mut self, index: i32) {
         let max_ind = self.actions.len() as i32 - 1;
@@ -99,8 +113,8 @@ impl JobActionsMenu {
         self.deactivate();
     }
 
-    pub fn activate(&mut self, job_name: &str) {
-        self.job_name = job_name.to_string();
+    pub fn activate(&mut self, job: &Job) {
+        self.set_job(job.clone());
         self.should_render = true;
         self.handle_input = true;
         self.set_index(0);
