@@ -61,6 +61,7 @@ impl<T: Display + FromStr> TextField<T> {
         self.value = lines.parse().unwrap();
     }
 
+
 }
 
 // ====================================================================
@@ -68,36 +69,46 @@ impl<T: Display + FromStr> TextField<T> {
 // ====================================================================
 
 impl<T: Display + FromStr> TextField<T> {
-    pub fn render(&self, f: &mut Frame, area: &Rect) {
+    pub fn render(&mut self, f: &mut Frame, area: &Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), 
                          Constraint::Length(2),
                          Constraint::Percentage(50)])
             .split(*area);
-        let line = Line::from(self.label.as_str())
+
+        // first render the label
+        let mut line = Line::from(self.label.as_str())
             .style(Style::default())
             .alignment(Alignment::Right);
 
+        if self.focused {
+            line = line.style(
+                Style::default().bg(Color::Blue)
+                .fg(Color::Black).add_modifier(Modifier::BOLD));
+        };
+
         f.render_widget(line, chunks[0]);
+
+        if self.focused && self.active {
+            self.text_area.set_cursor_style(Style::default().bg(Color::Blue));
+            self.text_area.set_cursor_line_style(
+                Style::default().fg(Color::Blue)
+                .add_modifier(Modifier::BOLD));
+        } else if self.focused && !self.active {
+            self.text_area.set_cursor_line_style(Style::default());
+            self.text_area.set_cursor_style(Style::default());
+            self.text_area.set_style(
+                Style::default().bg(Color::Blue).fg(Color::Black)
+                .add_modifier(Modifier::BOLD));
+        } else {
+            self.text_area.set_cursor_line_style(Style::default());
+            self.text_area.set_cursor_style(Style::default());
+            self.text_area.set_style(Style::default());
+        }
+       
 
         f.render_widget(self.text_area.widget(), chunks[2]);
 
-        //
-        // let text = match self.field_type {
-        //     TextFieldType::Text => "Text",
-        //     TextFieldType::Integer => "Integer",
-        //     TextFieldType::Boolean => "Boolean",
-        // };
-        //
-        // let text = format!("{}: {}", self.label, text);
-        // let text = Paragraph::new(text)
-        //     .block(Block::default().borders(Borders::ALL).title("Field Type"))
-        //     .wrap(Wrap { trim: true });
-        //
-        // f.render_widget(text, chunks[0]);
-        //
-        // let text_area = self.text_area.render(area);
-        // f.render_widget(text_area, chunks[1]);
     }
 }

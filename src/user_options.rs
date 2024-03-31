@@ -22,6 +22,13 @@ pub struct UserOptionsList {
     pub confirm_before_quit: bool,  // Confirm before quitting
     pub confirm_before_kill: bool,  // Confirm before killing a job
     pub external_editor: String,    // External editor command (e.g. "vim")
+    pub _placeholder1: String,        // Placeholder for future options
+    pub _placeholder2: String,        // Placeholder for future options
+    pub _placeholder3: String,        // Placeholder for future options
+    pub _placeholder4: String,        // Placeholder for future options
+    pub _placeholder5: String,        // Placeholder for future options
+    pub _placeholder6: String,        // Placeholder for future options
+    pub _placeholder7: String,        // Placeholder for future options
 }
 
 impl Default for UserOptionsList {
@@ -32,6 +39,13 @@ impl Default for UserOptionsList {
             confirm_before_quit: false,
             confirm_before_kill: true,
             external_editor: "vim".to_string(),
+            _placeholder1: "dummy".to_string(),
+            _placeholder2: "dummy".to_string(),
+            _placeholder3: "dummy".to_string(),
+            _placeholder4: "dummy".to_string(),
+            _placeholder5: "dummy".to_string(),
+            _placeholder6: "dummy".to_string(),
+            _placeholder7: "dummy".to_string(),
         }
     }
 }
@@ -157,7 +171,27 @@ impl UserOptions {
             Entry::Text(TextField::new(
                 list.external_editor, 
                 "External editor")),
-
+            Entry::Text(TextField::new(
+                list._placeholder1, 
+                "Placeholder1")),
+            Entry::Text(TextField::new(
+                list._placeholder2, 
+                "Placeholder2")),
+            Entry::Text(TextField::new(
+                list._placeholder3, 
+                "Placeholder3")),
+            Entry::Text(TextField::new(
+                list._placeholder4, 
+                "Placeholder4")),
+            Entry::Text(TextField::new(
+                list._placeholder5, 
+                "Placeholder5")),
+            Entry::Text(TextField::new(
+                list._placeholder6, 
+                "Placeholder6")),
+            Entry::Text(TextField::new(
+                list._placeholder7, 
+                "Placeholder7")),
         ];
 
         Self {
@@ -174,7 +208,9 @@ impl UserOptions {
 
     pub fn load() -> Self {
         let list = UserOptionsList::load();
-        Self::from_list(list)
+        let mut user_options = Self::from_list(list);
+        user_options.set_focus(0, true);
+        user_options
     }
 }
 
@@ -209,6 +245,7 @@ impl UserOptions {
     }
 
     pub fn set_index(&mut self, index: i32) {
+        self.set_focus(self.index as usize, false);
         let max_ind = self.entries.len() as i32 - 1;
         let mut new_index = index;
         if index > max_ind {
@@ -217,6 +254,7 @@ impl UserOptions {
             new_index = max_ind;
         } 
         self.index = new_index;
+        self.set_focus(self.index as usize, true);
         self.state.select(Some(self.index as usize));
     }
 
@@ -227,7 +265,16 @@ impl UserOptions {
     fn previous(&mut self) {
         self.set_index(self.index - 1);
     }
+
+    fn set_focus(&mut self, index: usize, focus: bool) {
+        match &mut self.entries[index] {
+            Entry::Integer(text_field) => text_field.focused = focus,
+            Entry::Boolean(text_field) => text_field.focused = focus,
+            Entry::Text(text_field) => text_field.focused = focus,
+        }
+    }
 }
+
 
 // ====================================================================
 //  RENDERING
@@ -266,10 +313,13 @@ impl UserOptions {
         while self.index < self.offset as i32 {
             self.offset -= 1;
         }
-        while self.index > self.offset as i32 + self.max_height as i32 {
+        while self.index > self.offset as i32 + self.max_height as i32 - 1 {
             self.offset += 1;
         }
-        let num_rows = self.entries.len() - self.offset as usize;
+        let mut num_rows = self.entries.len() - self.offset as usize;
+        if num_rows > self.max_height as usize {
+            num_rows = self.max_height as usize;
+        }
         let constraints = (0..num_rows)
             .map(|_| Constraint::Length(1)).collect::<Vec<_>>();
         let rects = Layout::default()
@@ -277,7 +327,7 @@ impl UserOptions {
             .constraints(constraints)
             .split(block.inner(rect));
 
-        for (rect, entry) in rects.iter().zip(&self.entries[self.offset as usize..]) {
+        for (rect, entry) in rects.iter().zip(&mut self.entries[self.offset as usize..]) {
             match entry {
                 Entry::Integer(text_field) => {
                     text_field.render(f, rect);
