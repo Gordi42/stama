@@ -6,6 +6,9 @@ use ratatui::{
 use crossterm::event::{
     KeyCode, KeyEvent, MouseEventKind, MouseButton,};
 use tui_textarea::{TextArea, CursorMove};
+use std::process::Command;
+use std::thread;
+use std::sync::mpsc;
 
 use crate::app::Action;
 use crate::job::{Job, JobStatus};
@@ -41,7 +44,6 @@ pub enum SortCategory {
 pub struct JobOverview {
     pub should_render: bool,  // if the window should render
     pub handle_input: bool,   // if the window should handle input
-    pub search_args: String,  // the search arguments for squeue
     pub sort_category: SortCategory, // the category to sort 
     pub reversed: bool,       // if the sorting is reversed
     pub collapsed_top: bool,  // if the job list is collapsed
@@ -54,6 +56,9 @@ pub struct JobOverview {
     pub squeue_command: TextArea<'static>, // the squeue command
     pub edit_squeue: bool,    // if the squeue command is being edited
     pub refresh_rate: usize,    // the refresh rate of the window
+    pub job_details: String,  // the job details
+    pub log_height: u16,      // the height of the log section
+    pub log: String,          // the log of the job
 }
 
 // ====================================================================
@@ -69,16 +74,16 @@ impl JobOverview {
         for _ in 0..6 {
             mouse_areas.categories.push(Rect::default());
         }
-        let mut textarea = TextArea::from(["squeue -U u301533"]);
+        let command = format!("squeue -u {}", whoami());
+        let mut textarea = TextArea::from([command]);
         textarea.move_cursor(CursorMove::End);
         Self {
             should_render: true,
             handle_input: true,
-            search_args: "-U u301533".to_string(),
             sort_category: SortCategory::Id,
             reversed: false,
             collapsed_top: false,
-            collapsed_bot: false,
+            collapsed_bot: true,
             focus: WindowFocus::JobDetails,
             joblist: vec![],
             index: 0,
@@ -87,6 +92,9 @@ impl JobOverview {
             squeue_command: textarea,
             edit_squeue: false,
             refresh_rate: refresh_rate,
+            job_details: String::new(),
+            log_height: 0,
+            log: String::new(),
         }
     }
 }
@@ -133,8 +141,8 @@ impl JobOverview {
         self.set_index(index.unwrap_or(0) as i32);
     }
 
-    pub fn get_job(&self) -> &Job {
-        &self.joblist[self.index]
+    pub fn get_job(&self) -> Option<&Job> {
+        self.joblist.get(self.index)
     }
 
     // pub fn get_jobname(&self) -> Option<String> {
@@ -164,15 +172,295 @@ impl JobOverview {
                 Job::new(2, "job7", JobStatus::Completed, 5123, "partition3", 120),
                 Job::new(194, "job8", JobStatus::Failed, 123, "partition4", 1),
                 Job::new(139, "job9", JobStatus::Running, 10, "partition1", 1),
-                Job::new(1123, "job10", JobStatus::Pending, 235, "partition2", 2),];
+                Job::new(9577782, "job10", JobStatus::Pending, 9577782, "partition2", 2),];
         } else {
-            self.joblist = vec![];
+            let command = self.get_squeue_command();
+            // setup a thread to get the joblist from squeue
+            let command_clone = command.clone();
+            let (tx_sq, rx_sq) = mpsc::channel();
+            let handle_sq = thread::spawn(move || {
+                tx_sq.send(get_squeue_joblist(&command_clone)).unwrap();
+            });
+            // setup a thread to get the joblist from sacct
+            let command_clone = command.clone();
+            let (tx_sa, rx_sa) = mpsc::channel();
+            let handle_sa = match user_options.show_completed_jobs {
+                true => {
+                    thread::spawn(move || {
+                        tx_sa.send(get_acct_joblist(&command_clone)).unwrap();
+                    })
+                },
+                false => thread::spawn(|| {}),
+            };
+            // setup a thread to get the job details
+            let (tx_jd, rx_jd) = mpsc::channel();
+            let get_job_det: bool;
+            let handle_jd = match self.get_job() {
+                Some(job) => {
+                    get_job_det = true;
+                    let id = job.id;
+                    thread::spawn(move || {
+                        tx_jd.send(get_job_details(&id.to_string())).unwrap();
+                    })
+                },
+                None => {
+                    get_job_det = false;
+                    thread::spawn(|| {})
+                }
+            };
+            // setup a thread to get the log
+            let (tx_log, rx_log) = mpsc::channel();
+            let handle_log = match get_job_det {
+                true => {
+                    let job_details = self.job_details.clone();
+                    let log_len = self.log_height;
+                    thread::spawn(move || {
+                        let log_path = match get_log_path(&job_details) {
+                            Some(path) => path,
+                            None => {
+                                return tx_log.send("No log file found.".to_string()).unwrap()
+                            }
+                        };
+                        tx_log.send(get_log_tail(&log_path, log_len.into())).unwrap();
+                    })
+                },
+                false => thread::spawn(|| {}),
+            };
+
+            // collect the joblist from squeue
+            self.joblist = rx_sq.recv().unwrap();
+            handle_sq.join().unwrap();
+            // collect the joblist from sacct
+            if user_options.show_completed_jobs {
+                self.joblist.extend(rx_sa.recv().unwrap());
+                handle_sa.join().unwrap();
+            }
+            // collect the job details
+            if get_job_det {
+                self.job_details = rx_jd.recv().unwrap();
+                handle_jd.join().unwrap();
+                self.log = rx_log.recv().unwrap();
+                handle_log.join().unwrap();
+            }
+            // if a job is JobStatus::Completing, another job JobStatus::Completed exist
+            // remove the JobStatus::Completed job
+            for (i, job) in self.joblist.iter().enumerate() {
+                if job.status == JobStatus::Completing {
+                    // get all indexes of jobs with the same id
+                    let indexes = self.joblist.iter()
+                        .enumerate()
+                        .filter(|(_, j)| j.id == job.id)
+                        .map(|(i, _)| i)
+                        .collect::<Vec<usize>>();
+                    for index in indexes {
+                        if index != i {
+                            self.joblist.remove(index);
+                        }
+                    }
+                    break;
+                }
+            }
+
         }
         // check if there is a job with the same id
         let index = self.joblist.iter().position(|job| job.id == id);
         self.set_index(index.unwrap_or(0) as i32);
         self.sort();
     }
+
+
+
+
+        
+}
+
+fn whoami() -> String {
+    let command = Command::new("whoami")
+        .output();
+    match command {
+        Ok(output) => {
+            let output = String::from_utf8_lossy(&output.stdout);
+            output.to_string()
+        },
+        Err(_) => {
+            "Error executing whoami".to_string()
+        },
+    }
+}
+
+fn get_squeue_joblist(command: &str) -> Vec<Job> {
+    let output = get_squeue_output(command);
+    format_squeue_output(&output)
+}
+
+pub fn get_squeue_output(command: &str) -> String {
+    // split the command into first word and the rest
+    let mut parts = command.trim().split_whitespace();
+    let program = parts.next().unwrap_or(" ");
+    let args: Vec<&str> = parts.collect();
+
+    let command_stat = Command::new(program)
+        .args(args)
+        .output();
+
+    match command_stat {
+        Ok(output) => {
+            if !output.status.success() {
+                return "Error executing command".to_string();
+            }
+            let output = String::from_utf8_lossy(&output.stdout);
+            output.to_string()
+        },
+        Err(_) => {
+            "Error executing squeue".to_string()
+        },
+    }
+}
+
+pub fn format_squeue_output(output: &str) -> Vec<Job> {
+    let mut joblist = vec![];
+    for line in output.lines().skip(1) {
+        let parts = line.split_whitespace().collect::<Vec<&str>>();
+        if parts.len() < 8 { continue; }
+        let id = parts[0].parse::<u32>().unwrap_or(0);
+        let partition = parts[1].to_string();
+        let name = parts[2].to_string();
+        let status = match parts[4] {
+            "R" => JobStatus::Running,
+            "PD" => JobStatus::Pending,
+            "CD" => JobStatus::Completed,
+            "CG" => JobStatus::Completing,
+            "F" => JobStatus::Failed,
+            _ => JobStatus::Unknown,
+        };
+        let time = time_string_to_seconds(parts[5]);
+        let nodes = parts[6].parse::<u32>().unwrap_or(0);
+        joblist.push(Job::new(id, &name, status, time, &partition, nodes));
+    }
+    joblist
+}
+
+fn get_acct_joblist(command: &str) -> Vec<Job> {
+    let output = get_sacct_output(command);
+    format_sacct_output(&output)
+}
+
+
+pub fn get_sacct_output(command: &str) -> String {
+    let mut parts = command.trim().split_whitespace();
+    let _program = parts.next().unwrap_or(" ");
+    let args: Vec<&str> = parts.collect();
+
+    let command_stat = Command::new("sacct")
+        .args(args)
+        .output();
+    match command_stat {
+        Ok(output) => {
+            if !output.status.success() {
+                return "Error executing sacct".to_string();
+            }
+            let output = String::from_utf8_lossy(&output.stdout);
+            output.to_string()
+        },
+        Err(_) => {
+            "Error executing sacct".to_string()
+        },
+    }
+}
+
+pub fn format_sacct_output(output: &str) -> Vec<Job> {
+    let mut joblist = vec![];
+    for line in output.lines().skip(2) {
+        let parts = line.split_whitespace().collect::<Vec<&str>>();
+        if parts.len() < 7 { continue; }
+        let id = match parts[0].parse::<u32>() {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+        let partition = parts[2].to_string();
+        let name = parts[1].to_string();
+        let status = match parts[5] {
+            "RUNNING" => continue,
+            "TIMEOUT" => JobStatus::Timeout,
+            "CANCELLED+" => JobStatus::Cancelled,
+            "COMPLETED" => JobStatus::Completed,
+            "PENDING" => continue,
+            _ => JobStatus::Unknown,
+        };
+        let time = 0;
+        let nodes = 0;
+        joblist.push(Job::new(id, &name, status, time, &partition, nodes));
+    }
+    joblist
+}
+
+pub fn get_job_details(job_id: &str) -> String {
+    let args = vec!["show", "job", &job_id];
+    let command_stat = Command::new("scontrol")
+        .args(args)
+        .output();
+    match command_stat {
+        Ok(output) => {
+            let output = String::from_utf8_lossy(&output.stdout);
+            output.to_string()
+        },
+        Err(e) => {
+            e.to_string()
+        },
+    }
+}
+
+fn get_log_path(job_details: &str) -> Option<String> {
+    let mut log_path = String::new();
+    for line in job_details.lines() {
+        if line.replace(" ", "").starts_with("StdOut=") {
+            log_path = line.split('=').collect::<Vec<&str>>()[1].to_string();
+            break;
+        }
+    }
+    if log_path.is_empty() {
+        return None;
+    }
+    Some(log_path)
+}
+
+fn get_log_tail(log_path: &str, lines: usize) -> String {
+    let command_stat = Command::new("tail")
+        .arg("-n")
+        .arg(lines.to_string())
+        .arg(log_path)
+        .output();
+    match command_stat {
+        Ok(output) => {
+            let output = String::from_utf8_lossy(&output.stdout);
+            output.to_string()
+        },
+        Err(e) => {
+            e.to_string()
+        },
+    }
+}
+
+fn time_string_to_seconds(time_str: &str) -> u32 {
+    // format the time string in D-HH:MM:SS
+    let time_str = match time_str.len() {
+        1 => format!("0-00:00:0{}", time_str),
+        2 => format!("0-00:00:{}", time_str),
+        3 => format!("0-00:00{}", time_str),
+        4 => format!("0-00:0{}", time_str),
+        5 => format!("0-00:{}", time_str),
+        6 => format!("0-00{}", time_str),
+        7 => format!("0-0{}", time_str),
+        8 => format!("0-{}", time_str),
+        9 => format!("0{}", time_str),
+        10 => time_str.to_string(),
+        _ => return 0,
+    };
+    let days = time_str[0..1].parse::<u32>().unwrap_or(0);
+    let hours = time_str[2..4].parse::<u32>().unwrap_or(0);
+    let minutes = time_str[5..7].parse::<u32>().unwrap_or(0);
+    let seconds = time_str[8..10].parse::<u32>().unwrap_or(0);
+    days * 86400 + hours * 3600 + minutes * 60 + seconds
 }
 
 
@@ -398,6 +686,7 @@ impl JobOverview {
     // RENDERING THE JOB DETAILS AND LOG SECTION
     // ----------------------------------------------------------------------
     fn render_bottom_section(&mut self, f: &mut Frame, area: &Rect) {
+        self.log_height = area.height.saturating_sub(2);
         match self.collapsed_bot {
             true => self.render_bottom_collapsed(f, area),
             false => self.render_bottom_extended(f, area),
@@ -448,7 +737,32 @@ impl JobOverview {
             .border_type(BorderType::Rounded);
 
         f.render_widget(block.clone(), *area);
-        let _ = block.inner(*area);
+        let rect = block.inner(*area);
+        match self.focus {
+            WindowFocus::JobDetails => {
+                self.render_job_details(f, &rect);
+            },
+            WindowFocus::Log => {
+                self.render_log(f, &rect);
+            },
+        }
+    }
+
+    fn render_job_details(&self, f: &mut Frame, area: &Rect) {
+
+        let paragraph = Paragraph::new(self.job_details.clone())
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: true });
+
+        f.render_widget(paragraph, *area);
+    }
+
+    fn render_log(&self, f: &mut Frame, area: &Rect) {
+        let paragraph = Paragraph::new(self.log.clone())
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: true });
+
+        f.render_widget(paragraph, *area);
     }
 
     fn update_bottom_mouse_positions(
@@ -476,8 +790,11 @@ fn get_job_color(job: &Job) -> Color {
     match job.status {
         JobStatus::Running => Color::Green,
         JobStatus::Pending => Color::Yellow,
+        JobStatus::Completing => Color::Yellow,
         JobStatus::Completed => Color::Gray,
         JobStatus::Failed => Color::Red,
+        JobStatus::Timeout => Color::Red,
+        JobStatus::Cancelled => Color::Red,
         JobStatus::Unknown => Color::Red,
     }
 }
@@ -488,7 +805,10 @@ fn format_status(job: &Job) -> String {
         JobStatus::Running => "Running",
         JobStatus::Pending => "Pending",
         JobStatus::Completed => "Completed",
+        JobStatus::Completing => "Completing",
         JobStatus::Failed => "Failed",
+        JobStatus::Timeout => "Timeout",
+        JobStatus::Cancelled => "Cancelled",
     }.to_string()
 }
 
@@ -801,3 +1121,26 @@ impl JobOverview {
     }
 }
 
+// ====================================================================
+//  TESTS
+// ====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_log_path() {
+        let job_details = "
+JobId=9638603 JobName=dummy_name
+   NodeList=l[50321-50324,50327,50330,50333,50337-50338,50340-50341,50343]
+   BatchHost=l50321
+   Command=./path/to/command.run
+   WorkDir=/work/dir
+   StdErr=/std/LOG.err
+   StdIn=/dev/null
+   StdOut=/std/LOG.out";
+        let log_path = get_log_path(job_details);
+        assert_eq!(log_path, Some("/std/LOG.out".to_string()));
+    }
+}

@@ -44,12 +44,14 @@ impl App {
     pub fn new() -> Self {
         let user_options = UserOptions::load();
         let refresh_rate = user_options.refresh_rate;
+        let mut job_overview = JobOverview::new(refresh_rate);
+        job_overview.update_joblist(&user_options);
         Self {
             action: Action::None,
             should_quit: false,
             should_set_frame_rate: false,
             should_redraw: true,
-            job_overview: JobOverview::new(refresh_rate),
+            job_overview: job_overview,
             job_actions_menu: JobActionsMenu::new(),
             message: Message::new_disabled(),
             confirmation: Confirmation::new_disabled(),
@@ -126,13 +128,15 @@ impl App {
     }
 
     fn open_job_action(&mut self) {
-        if self.job_overview.joblist.is_empty() {
-            self.message = Message::new("No jobs to select");
-            self.message.kind = MessageKind::Error;
-            return;
+        match self.job_overview.get_job() {
+            Some(job) => {
+                self.job_actions_menu.activate(&job);
+            }
+            None => {
+                self.message = Message::new("No job selected");
+                self.message.kind = MessageKind::Error;
+            }
         }
-        let job = self.job_overview.get_job();
-        self.job_actions_menu.activate(&job);
     }
 
     fn open_job_allocation(&mut self) {
@@ -173,13 +177,16 @@ impl App {
     }
 
     fn kill_job(&mut self, job: &Job) {
-        let command = format!("scancel {}", job.id);
         let command_status = Command::new("scancel")
             .arg(job.id.to_string())
             .output();
         match command_status {
-            Ok(_) => {
-                self.message = Message::new("Job killed");
+            Ok(output) => {
+                if !output.status.success() {
+                    let error_msg = String::from_utf8_lossy(&output.stderr);
+                    self.message = Message::new(&format!("Error killing job: {}", error_msg));
+                    self.message.kind = MessageKind::Error;
+                }
             }
             Err(e) => {
                 self.message = Message::new(&format!("Error killing job: {}", e));

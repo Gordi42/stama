@@ -1,11 +1,14 @@
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub enum JobStatus {
     #[default]
     Unknown,
     Running,
     Pending,
+    Completing,
     Completed,
+    Timeout,
+    Cancelled,
     Failed,
 }
 
@@ -16,7 +19,10 @@ impl JobStatus {
             JobStatus::Pending => 1,
             JobStatus::Running => 2,
             JobStatus::Failed => 3,
-            JobStatus::Completed => 4,
+            JobStatus::Completing => 4,
+            JobStatus::Completed => 5,
+            JobStatus::Timeout => 6,
+            JobStatus::Cancelled => 7,
         }
     }
 }
