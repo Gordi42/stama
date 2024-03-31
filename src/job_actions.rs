@@ -129,12 +129,18 @@ impl JobActionsMenu {
             .flex(Flex::Center);
         let [rect] = vertical.areas(f.size());
         let [rect] = horizontal.areas(rect);
+
         self.rect = rect;
+        // clear the area
+        f.render_widget(Clear, rect);
+
+        let title = format!("JOB ACTION: {}", self.job_name);
 
         let list = List::new(self.labels.clone())
             .block(Block::default()
                    .borders(Borders::ALL)
-                   .title(format!("Actions for: {}", self.job_name))
+                   .title(block::Title::from(title)
+                          .alignment(Alignment::Center))
                    .border_type(BorderType::Rounded)
                    .style(Style::default().fg(Color::Blue))
             )

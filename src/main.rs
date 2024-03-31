@@ -21,6 +21,7 @@ pub mod text_field;
 pub mod user_options;
 pub mod user_options_menu;
 pub mod message;
+pub mod confirmation;
 
 
 fn main() -> Result<()> {

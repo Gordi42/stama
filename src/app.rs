@@ -5,12 +5,14 @@ use crate::{
 use crate::job_actions::{JobActionsMenu, JobActions};
 use crate::user_options::UserOptions;
 use crate::user_options_menu::UserOptionsMenu;
+use crate::confirmation::Confirmation;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub enum Action {
     #[default]
     None,
     Quit,
+    ConfirmedQuit,
     OpenJobAction,
     OpenJobAllocation,
     OpenJobOverview,
@@ -29,6 +31,7 @@ pub struct App {
     pub job_overview: JobOverview,
     pub job_actions_menu: JobActionsMenu,
     pub message: Message,
+    pub confirmation: Confirmation,
     pub user_options_menu: UserOptionsMenu,
     pub user_options: UserOptions,
     pub mouse_input: MouseInput,
@@ -46,15 +49,13 @@ impl App {
             job_overview: JobOverview::new(refresh_rate),
             job_actions_menu: JobActionsMenu::new(),
             message: Message::new_disabled(),
+            confirmation: Confirmation::new_disabled(),
             user_options_menu: UserOptionsMenu::load(),
             user_options: user_options,
             mouse_input: MouseInput::new(),
         }
     }
 
-    pub fn quit(&mut self) {
-        self.should_quit = true;
-    }
 
     pub fn tick(&mut self) {
         let job_overview = &mut self.job_overview;
@@ -65,7 +66,12 @@ impl App {
 
     pub fn handle_action(&mut self) {
         match &self.action {
-            Action::Quit => { self.quit(); }
+            Action::Quit => { 
+                self.quit(); 
+            }
+            Action::ConfirmedQuit => {
+                self.confirmed_quit();
+            }
             Action::OpenMessage(message) => {
                 self.open_message(message.clone());
             }
@@ -93,6 +99,19 @@ impl App {
             _ => {}
         };
         self.action = Action::None;
+    }
+
+    pub fn quit(&mut self) {
+        if self.user_options.confirm_before_quit {
+            self.confirmation = Confirmation::new(
+                "Quit?", Action::ConfirmedQuit);
+        } else {
+            self.should_quit = true;
+        }
+    }
+
+    pub fn confirmed_quit(&mut self) {
+        self.should_quit = true;
     }
 
     fn open_message(&mut self, message: Message) {
