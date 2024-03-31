@@ -11,7 +11,7 @@ use ratatui::{
 use crossterm::event::{
     KeyCode, KeyEvent, MouseButton, MouseEventKind};
 
-use crate::text_field::{TextField};
+use crate::text_field::{TextField, TextFieldType};
 use crate::app::Action;
 use crate::mouse_input::MouseInput;
 
@@ -22,13 +22,7 @@ pub struct UserOptionsList {
     pub confirm_before_quit: bool,  // Confirm before quitting
     pub confirm_before_kill: bool,  // Confirm before killing a job
     pub external_editor: String,    // External editor command (e.g. "vim")
-    pub _placeholder1: String,        // Placeholder for future options
-    pub _placeholder2: String,        // Placeholder for future options
-    pub _placeholder3: String,        // Placeholder for future options
-    pub _placeholder4: String,        // Placeholder for future options
-    pub _placeholder5: String,        // Placeholder for future options
-    pub _placeholder6: String,        // Placeholder for future options
-    pub _placeholder7: String,        // Placeholder for future options
+    pub dummy_jobs: bool,            // if dummy jobs should be created
 }
 
 impl Default for UserOptionsList {
@@ -39,13 +33,7 @@ impl Default for UserOptionsList {
             confirm_before_quit: false,
             confirm_before_kill: true,
             external_editor: "vim".to_string(),
-            _placeholder1: "dummy".to_string(),
-            _placeholder2: "dummy".to_string(),
-            _placeholder3: "dummy".to_string(),
-            _placeholder4: "dummy".to_string(),
-            _placeholder5: "dummy".to_string(),
-            _placeholder6: "dummy".to_string(),
-            _placeholder7: "dummy".to_string(),
+            dummy_jobs: false,
         }
     }
 }
@@ -130,21 +118,17 @@ fn touch_dir(file_dir: &str) -> Result<()> {
 
 
 
-pub enum Entry {
-    Integer(TextField<usize>),
-    Boolean(TextField<bool>),
-    Text(TextField<String>),
-}
 
 pub struct UserOptions {
     pub should_render: bool,
     pub handle_input: bool,
     pub rect: Rect,
-    pub entries: Vec<Entry>,
+    pub entries: Vec<TextField>,
     pub index: i32,
     pub state: ListState,
     pub offset: u16,
     pub max_height: u16,
+    pub rects: Vec<Rect>,
 }
 
 // ====================================================================
@@ -156,42 +140,24 @@ impl UserOptions {
         let list = list.clone();
 
         let entries = vec![
-            Entry::Integer(TextField::new(
-                list.refresh_rate, 
-                "Refresh rate (ms)")),
-            Entry::Boolean(TextField::new(
-                list.show_completed_jobs, 
-                "Show completed jobs")),
-            Entry::Boolean(TextField::new(
-                list.confirm_before_quit, 
-                "Confirm before quitting")),
-            Entry::Boolean(TextField::new(
-                list.confirm_before_kill, 
-                "Confirm before killing a job")),
-            Entry::Text(TextField::new(
-                list.external_editor, 
-                "External editor")),
-            Entry::Text(TextField::new(
-                list._placeholder1, 
-                "Placeholder1")),
-            Entry::Text(TextField::new(
-                list._placeholder2, 
-                "Placeholder2")),
-            Entry::Text(TextField::new(
-                list._placeholder3, 
-                "Placeholder3")),
-            Entry::Text(TextField::new(
-                list._placeholder4, 
-                "Placeholder4")),
-            Entry::Text(TextField::new(
-                list._placeholder5, 
-                "Placeholder5")),
-            Entry::Text(TextField::new(
-                list._placeholder6, 
-                "Placeholder6")),
-            Entry::Text(TextField::new(
-                list._placeholder7, 
-                "Placeholder7")),
+            TextField::new(
+                "Refresh rate (ms)", 
+                TextFieldType::Integer(list.refresh_rate)),
+            TextField::new(
+                "Show completed jobs", 
+                TextFieldType::Boolean(list.show_completed_jobs)),
+            TextField::new(
+                "Confirm before quitting", 
+                TextFieldType::Boolean(list.confirm_before_quit)),
+            TextField::new(
+                "Confirm before killing a job", 
+                TextFieldType::Boolean(list.confirm_before_kill)),
+            TextField::new(
+                "External editor", 
+                TextFieldType::Text(list.external_editor)),
+            TextField::new(
+                "Create dummy jobs", 
+                TextFieldType::Boolean(list.dummy_jobs)),
         ];
 
         Self {
@@ -203,6 +169,7 @@ impl UserOptions {
             state: ListState::default(),
             offset: 0,
             max_height: 0,
+            rects: vec![],
         }
     }
 
@@ -226,9 +193,29 @@ impl UserOptions {
 
     pub fn to_list(&self) -> UserOptionsList {
         let mut user_options = UserOptionsList::default();
-        user_options.refresh_rate = match &self.entries[0] {
-            Entry::Integer(text_field) => text_field.value,
-            _ => 0,
+        user_options.refresh_rate = match &self.entries[0].field_type {
+            TextFieldType::Integer(u) => *u,
+            _ => 250,
+        };
+        user_options.show_completed_jobs = match &self.entries[1].field_type {
+            TextFieldType::Boolean(b) => *b,
+            _ => true,
+        };
+        user_options.confirm_before_quit = match &self.entries[2].field_type {
+            TextFieldType::Boolean(b) => *b,
+            _ => false,
+        };
+        user_options.confirm_before_kill = match &self.entries[3].field_type {
+            TextFieldType::Boolean(b) => *b,
+            _ => true,
+        };
+        user_options.external_editor = match &self.entries[4].field_type {
+            TextFieldType::Text(s) => s.clone(),
+            _ => "vim".to_string(),
+        };
+        user_options.dummy_jobs = match &self.entries[5].field_type {
+            TextFieldType::Boolean(b) => *b,
+            _ => false,
         };
         user_options
     }
@@ -267,11 +254,7 @@ impl UserOptions {
     }
 
     fn set_focus(&mut self, index: usize, focus: bool) {
-        match &mut self.entries[index] {
-            Entry::Integer(text_field) => text_field.focused = focus,
-            Entry::Boolean(text_field) => text_field.focused = focus,
-            Entry::Text(text_field) => text_field.focused = focus,
-        }
+        self.entries[index].focused = focus;
     }
 }
 
@@ -301,7 +284,7 @@ impl UserOptions {
         f.render_widget(Clear, rect); //this clears out the background
 
         let block = Block::default()
-            .title("User Settings:")
+            .title(block::Title::from("USER SETTINGS:").alignment(Alignment::Center))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Blue))
             .title_style(Style::default().fg(Color::Blue)
@@ -326,19 +309,10 @@ impl UserOptions {
             .direction(Direction::Vertical)
             .constraints(constraints)
             .split(block.inner(rect));
+        self.rects = rects.to_vec();
 
         for (rect, entry) in rects.iter().zip(&mut self.entries[self.offset as usize..]) {
-            match entry {
-                Entry::Integer(text_field) => {
-                    text_field.render(f, rect);
-                },
-                Entry::Boolean(text_field) => {
-                    text_field.render(f, rect);
-                },
-                Entry::Text(text_field) => {
-                    text_field.render(f, rect);
-                },
-            }
+            entry.render(f, rect);
         }
 
 
@@ -356,8 +330,19 @@ impl UserOptions {
     pub fn input(&mut self, _action: &mut Action, key_event: KeyEvent) -> bool {
         if !self.handle_input { return false; }
 
+        // check if the user is typing in a text field
+        let entry = &mut self.entries[self.index as usize];
+        if entry.active {
+            match key_event.code {
+                _ => {
+                    entry.input(key_event);
+                }
+            }
+            return true;
+        }
+
         match key_event.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('o') => {
                 self.deactivate();
             },
             KeyCode::Down | KeyCode::Char('j') => {
@@ -365,6 +350,9 @@ impl UserOptions {
             },
             KeyCode::Up | KeyCode::Char('k') => {
                 self.previous();
+            },
+            KeyCode::Enter | KeyCode::Char('i') => {
+                self.entries[self.index as usize].on_enter();
             },
             
             _ => {}
@@ -386,13 +374,33 @@ impl UserOptions {
 
         if let Some(mouse_event_kind) = mouse_input.kind() {
 
+            // check if the user is editing a text field
+            let entry = &mut self.entries[self.index as usize];
+            if entry.active {
+                return;
+            }
+
             match mouse_event_kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     // close the window if the user clicks outside of it
                     if !self.rect.contains(mouse_input.get_position()) {
                         self.deactivate();
                         mouse_input.click();
+                        return;
                     } 
+                    // check if the user clicked on a text field
+                    for (i, rect) in self.rects.iter().enumerate() {
+                        if rect.contains(mouse_input.get_position()) {
+                            self.set_index(i as i32 + self.offset as i32);
+                            // check if the click is a double click
+                            if mouse_input.is_double_click() {
+                                self.entries[self.index as usize].on_enter();
+                            }
+                            mouse_input.click();
+                            return;
+                        }
+                    }
+                
                 }
                 // scrolling
                 MouseEventKind::ScrollUp => {

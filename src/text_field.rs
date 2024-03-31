@@ -1,53 +1,42 @@
-use std::str::FromStr;
-use std::fmt::Display;
-use tui_textarea::TextArea;
-use std::fmt::Debug;
+use tui_textarea::{TextArea, CursorMove};
 use ratatui::{
     prelude::*,
     style::{Color, Style},
-    widgets::*,
 };
 use crossterm::event::{
     KeyCode, KeyEvent};
 
 pub enum TextFieldType {
-    Text,
-    Integer,
-    Boolean,
+    Text(String),
+    Integer(usize),
+    Boolean(bool),
 }
 
 
 
-pub struct TextField<T: Display + FromStr> {
+pub struct TextField {
     pub text_area: TextArea<'static>,
     pub field_type: TextFieldType,
     pub active: bool,
     pub focused: bool,
     pub label: String,
-    pub value: T,
 }
 
 // ====================================================================
 // CONSTRUCTOR
 // ====================================================================
 
-impl<T: Display + FromStr> TextField<T> {
-    pub fn new(value: T, label: &str) -> Self {
-        // match the type of the value
-        let field_type = match std::any::type_name::<T>() {
-            "bool" => TextFieldType::Boolean,
-            "usize" => TextFieldType::Integer,
-            "String" => TextFieldType::Text,
-            _ => TextFieldType::Text,
-        };
-        Self {
-            text_area: TextArea::from([value.to_string()]),
+impl TextField {
+    pub fn new(label: &str, field_type: TextFieldType) -> Self {
+        let mut text_field = Self {
+            text_area: TextArea::from([""]),
             field_type: field_type,
             active: false,
             focused: false,
             label: label.to_string(),
-            value: value,
-        }
+        };
+        text_field.sync_v2t();
+        text_field
     }
 }
 
@@ -55,30 +44,103 @@ impl<T: Display + FromStr> TextField<T> {
 // METHODS
 // ====================================================================
 
-impl<T: Display + FromStr> TextField<T> {
-    pub fn sync(&mut self) where <T as FromStr>::Err: Debug {
+impl TextField {
+    pub fn sync_t2v(&mut self) {
         let lines = self.text_area.lines().join("\n");
-        self.value = lines.parse().unwrap();
+        match self.field_type {
+            TextFieldType::Boolean(_) => {
+                let b = string_to_bool(lines.as_str());
+                self.field_type = TextFieldType::Boolean(b);
+            },
+            TextFieldType::Integer(_) => {
+                let u = lines.parse::<usize>().unwrap_or(0);
+                self.field_type = TextFieldType::Integer(u);
+            },
+            TextFieldType::Text(_) => {
+                self.field_type = TextFieldType::Text(lines);
+            },
+        }
     }
 
+    pub fn sync_v2t(&mut self) {
+        let text_content = match self.field_type {
+            TextFieldType::Boolean(b) => bool_to_string(b),
+            TextFieldType::Integer(i) => i.to_string(),
+            TextFieldType::Text(ref s) => s.clone(),
+        };
+        self.text_area = TextArea::from([text_content]);
+        self.text_area.move_cursor(CursorMove::End);
+    }
 
+    pub fn on_enter(&mut self) {
+        match self.field_type {
+            TextFieldType::Boolean(old_value) => {
+                self.field_type = TextFieldType::Boolean(!old_value);
+                self.sync_v2t();
+            },
+            TextFieldType::Integer(_) => {
+                self.active = true;
+            },
+            TextFieldType::Text(_) => {
+                self.active = true;
+            },
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.sync_v2t();
+        self.active = false;
+    }
+
+    pub fn apply(&mut self) {
+        // check if the value is valid
+        let is_valid = match self.field_type {
+            TextFieldType::Integer(_) => {
+                let lines = self.text_area.lines().join("\n");
+                !lines.parse::<usize>().is_err()
+            },
+            _ => true,
+        };
+        if is_valid {
+            self.sync_t2v();
+            self.active = false;
+        } else {
+            self.reset();
+        }
+    }
+}
+
+fn bool_to_string(b: bool) -> String {
+    match b {
+        true => "true".to_string(),
+        false => "false".to_string(),
+    }
+}
+
+fn string_to_bool(s: &str) -> bool {
+    match s {
+        "true" => true,
+        "false" => false,
+        _ => false,
+    }
 }
 
 // ====================================================================
 //  RENDER
 // ====================================================================
 
-impl<T: Display + FromStr> TextField<T> {
+impl TextField {
     pub fn render(&mut self, f: &mut Frame, area: &Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), 
-                         Constraint::Length(2),
+                         Constraint::Length(1),
                          Constraint::Percentage(50)])
             .split(*area);
 
         // first render the label
-        let mut line = Line::from(self.label.as_str())
+        let label = format!("{}: ", self.label);
+        let mut line = Line::from(label)
             .style(Style::default())
             .alignment(Alignment::Right);
 
@@ -90,25 +152,58 @@ impl<T: Display + FromStr> TextField<T> {
 
         f.render_widget(line, chunks[0]);
 
+        // render the middle part
+        let mut line = Line::from(" ")
+            .style(Style::default());
+        if self.focused && !self.active {
+            line = line.style(
+                Style::default().bg(Color::Blue)
+                .fg(Color::Black).add_modifier(Modifier::BOLD));
+        };
+        f.render_widget(line, chunks[1]);
+
+        // set default style of the text area
+        self.text_area.set_cursor_line_style(Style::default());
+        self.text_area.set_cursor_style(Style::default());
+        self.text_area.set_style(Style::default());
+
         if self.focused && self.active {
             self.text_area.set_cursor_style(Style::default().bg(Color::Blue));
             self.text_area.set_cursor_line_style(
                 Style::default().fg(Color::Blue)
                 .add_modifier(Modifier::BOLD));
         } else if self.focused && !self.active {
-            self.text_area.set_cursor_line_style(Style::default());
-            self.text_area.set_cursor_style(Style::default());
             self.text_area.set_style(
                 Style::default().bg(Color::Blue).fg(Color::Black)
                 .add_modifier(Modifier::BOLD));
         } else {
-            self.text_area.set_cursor_line_style(Style::default());
-            self.text_area.set_cursor_style(Style::default());
-            self.text_area.set_style(Style::default());
         }
-       
 
         f.render_widget(self.text_area.widget(), chunks[2]);
 
+    }
+}
+
+// ====================================================================
+//  USER INPUT
+// ====================================================================
+
+impl TextField {
+    /// Handle user input for the user settings window
+    /// Always returns true (input is always handled)
+    pub fn input(&mut self, key_event: KeyEvent) -> bool {
+
+        match key_event.code {
+            KeyCode::Esc => {
+                self.reset();
+            },
+            KeyCode::Enter => {
+                self.apply();
+            },
+            _ => {
+                self.text_area.input(key_event);
+            }
+        }
+        true
     }
 }
