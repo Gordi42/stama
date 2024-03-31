@@ -6,6 +6,8 @@ use ratatui::{
 use crossterm::event::{
     KeyCode, KeyEvent};
 
+use crate::app::Action;
+
 pub enum TextFieldType {
     Text(String),
     Integer(usize),
@@ -191,7 +193,7 @@ impl TextField {
 impl TextField {
     /// Handle user input for the user settings window
     /// Always returns true (input is always handled)
-    pub fn input(&mut self, key_event: KeyEvent) -> bool {
+    pub fn input(&mut self, key_event: KeyEvent, action: &mut Action) -> bool {
 
         match key_event.code {
             KeyCode::Esc => {
@@ -199,6 +201,7 @@ impl TextField {
             },
             KeyCode::Enter => {
                 self.apply();
+                *action = Action::UpdateUserOptions;
             },
             _ => {
                 self.text_area.input(key_event);

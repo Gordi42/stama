@@ -70,7 +70,7 @@ pub fn mouse_input(app: &mut App, mouse_event: MouseEvent) {
     app.mouse_input.event = Some(mouse_event);
 
     app.message.mouse_input(&mut app.action, &mut app.mouse_input);
-    app.user_options.mouse_input(&mut app.action, &mut app.mouse_input);
+    app.user_options_menu.mouse_input(&mut app.action, &mut app.mouse_input);
     app.job_actions_menu.mouse_input(&mut app.action, &mut app.mouse_input);
 
     app.job_overview.mouse_input(&mut app.action, &mut app.mouse_input);

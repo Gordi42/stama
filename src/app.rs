@@ -4,6 +4,7 @@ use crate::{
     mouse_input::MouseInput,};
 use crate::job_actions::{JobActionsMenu, JobActions};
 use crate::user_options::UserOptions;
+use crate::user_options_menu::UserOptionsMenu;
 
 #[derive(Debug, Default)]
 pub enum Action {
@@ -14,6 +15,7 @@ pub enum Action {
     OpenJobAllocation,
     OpenJobOverview,
     OpenUserOptions,
+    UpdateUserOptions,
     OpenMessage(Message),
     SortJobList,
     JobOption(JobActions)
@@ -26,6 +28,7 @@ pub struct App {
     pub job_overview: JobOverview,
     pub job_actions_menu: JobActionsMenu,
     pub message: Message,
+    pub user_options_menu: UserOptionsMenu,
     pub user_options: UserOptions,
     pub mouse_input: MouseInput,
 }
@@ -39,6 +42,7 @@ impl App {
             job_overview: JobOverview::new(),
             job_actions_menu: JobActionsMenu::new(),
             message: Message::new_disabled(),
+            user_options_menu: UserOptionsMenu::load(),
             user_options: UserOptions::load(),
             mouse_input: MouseInput::new(),
         }
@@ -46,6 +50,12 @@ impl App {
 
     pub fn quit(&mut self) {
         self.should_quit = true;
+    }
+
+    pub fn tick(&mut self) {
+        let job_overview = &mut self.job_overview;
+        let user_options = &self.user_options;
+        job_overview.update_joblist(user_options);
     }
 
 
@@ -73,7 +83,10 @@ impl App {
                 self.message = Message::new("Opening job allocation not implemented");
             }
             Action::OpenUserOptions => {
-                self.user_options.activate();
+                self.user_options_menu.activate();
+            }
+            Action::UpdateUserOptions => {
+                self.user_options = self.user_options_menu.to_user_option();
             }
             Action::SortJobList => {
                 self.job_overview.sort();

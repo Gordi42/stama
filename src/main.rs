@@ -19,35 +19,13 @@ pub mod job_overview;
 pub mod job_actions;
 pub mod text_field;
 pub mod user_options;
+pub mod user_options_menu;
 pub mod message;
 
-use crate::job::{Job, JobStatus};
 
 fn main() -> Result<()> {
     // Create an application with 10 jobs.
     let mut app = App::new();
-    app.job_overview.joblist
-        .push(Job::new(1, "job1", JobStatus::Running, 10, "partition1", 1));
-    app.job_overview.joblist
-        .push(Job::new(13, "job2", JobStatus::Pending, 235, "partition2", 2));
-    app.job_overview.joblist
-        .push(Job::new(15, "job3", JobStatus::Completed, 5123, "partition3", 120));
-    app.job_overview.joblist
-        .push(Job::new(12314, "job4", JobStatus::Failed, 123, "partition4", 1));
-    app.job_overview.joblist
-        .push(Job::new(133, "job5", JobStatus::Running, 10, "partition1", 1));
-    app.job_overview.joblist
-        .push(Job::new(1134, "job6", JobStatus::Pending, 235, "partition2", 2));
-    app.job_overview.joblist
-        .push(Job::new(2, "job7", JobStatus::Completed, 5123, "partition3", 120));
-    app.job_overview.joblist
-        .push(Job::new(194, "job8", JobStatus::Failed, 123, "partition4", 1));
-    app.job_overview.joblist
-        .push(Job::new(139, "job9", JobStatus::Running, 10, "partition1", 1));
-    app.job_overview.joblist
-        .push(Job::new(1123, "job10", JobStatus::Pending, 235, "partition2", 2));
-    app.job_overview.sort();
-    // let mut app = App::new();
     app.job_overview.set_index(0);
  
 
@@ -64,7 +42,7 @@ fn main() -> Result<()> {
         tui.draw(&mut app)?;
         // Handle events.
         match tui.events.next()? {
-            Event::Tick => {}
+            Event::Tick => {app.tick();}
             Event::Key(key_event) => update(&mut app, key_event),
             Event::Mouse(mouse_event) => mouse_input(&mut app, mouse_event),
             Event::Resize(_, _) => {}
