@@ -43,13 +43,15 @@ impl EventHandler {
             let sender = sender.clone();
             thread::spawn(move || {
                 let mut last_tick = Instant::now();
-                loop {
+                let mut running = true;
+                while running {
                     let timeout = tick_rate
                         .checked_sub(last_tick.elapsed())
                         .unwrap_or(tick_rate);
 
+
                     if event::poll(timeout).expect("unable to poll for event") {
-                        match event::read().expect("unable to read event") {
+                        let send_result = match event::read().expect("unable to read event") {
                             CrosstermEvent::Key(e) => {
                                 if e.kind == event::KeyEventKind::Press {
                                     sender.send(Event::Key(e))
@@ -64,14 +66,17 @@ impl EventHandler {
                                 sender.send(Event::Resize(w, h))
                             }
                             _ => unimplemented!(),
+                        };
+                        if send_result.is_err() {
+                            running = false;
                         }
-                        .expect("failed to send terminal event")
                     }
 
                     if last_tick.elapsed() >= tick_rate {
-                        sender
-                            .send(Event::Tick)
-                            .expect("failed to send tick event");
+                        let send_result = sender.send(Event::Tick);
+                        if send_result.is_err() {
+                            running = false;
+                        }
                         last_tick = Instant::now();
                     }
                 }

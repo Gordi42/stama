@@ -53,6 +53,7 @@ pub struct JobOverview {
     pub mouse_areas: MouseAreas, // the mouse areas of the window
     pub squeue_command: TextArea<'static>, // the squeue command
     pub edit_squeue: bool,    // if the squeue command is being edited
+    pub refresh_rate: usize,    // the refresh rate of the window
 }
 
 // ====================================================================
@@ -60,7 +61,7 @@ pub struct JobOverview {
 // ====================================================================
 
 impl JobOverview {
-    pub fn new() -> Self {
+    pub fn new(refresh_rate: usize) -> Self {
         let mut state = ListState::default();
         state.select(Some(0));
         // create mouse areas with 6 categories
@@ -85,6 +86,7 @@ impl JobOverview {
             mouse_areas: mouse_areas,
             squeue_command: textarea,
             edit_squeue: false,
+            refresh_rate: refresh_rate,
         }
     }
 }
@@ -278,10 +280,15 @@ impl JobOverview {
     fn render_joblist_extended(&mut self, f: &mut Frame, area: &Rect) {
         let title = "▼ Job list: ";
         let title_len = title.len() as u16;
+
+        let refresh_rate = format!(
+            "{} ms", self.refresh_rate);
         
         let block = Block::default().title(title)
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded);
+            .border_type(BorderType::Rounded)
+            .title(block::Title::from(refresh_rate)
+                   .alignment(Alignment::Right));
 
         // update the mouse areas
         let mut top_row = area.clone();

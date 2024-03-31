@@ -24,6 +24,7 @@ pub enum Action {
 pub struct App {
     pub action: Action,
     pub should_quit: bool,
+    pub should_set_frame_rate: bool,
     pub should_redraw: bool,
     pub job_overview: JobOverview,
     pub job_actions_menu: JobActionsMenu,
@@ -35,15 +36,18 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        let user_options = UserOptions::load();
+        let refresh_rate = user_options.refresh_rate;
         Self {
             action: Action::None,
             should_quit: false,
+            should_set_frame_rate: false,
             should_redraw: true,
-            job_overview: JobOverview::new(),
+            job_overview: JobOverview::new(refresh_rate),
             job_actions_menu: JobActionsMenu::new(),
             message: Message::new_disabled(),
             user_options_menu: UserOptionsMenu::load(),
-            user_options: UserOptions::load(),
+            user_options: user_options,
             mouse_input: MouseInput::new(),
         }
     }
@@ -63,40 +67,74 @@ impl App {
         match &self.action {
             Action::Quit => { self.quit(); }
             Action::OpenMessage(message) => {
-                self.message = message.clone();
+                self.open_message(message.clone());
             }
             Action::OpenJobOverview => {
-                self.message = Message::new("Opening job overview not implemented");
+                self.open_job_overview();
             }
             Action::OpenJobAction => {
-                match self.job_overview.get_jobname() {
-                    Some(job_name) => {
-                        self.job_actions_menu.activate(&job_name);
-                    }
-                    None => {
-                        self.message = Message::new("No job selected");
-                        self.message.kind = MessageKind::Error;
-                    }
-                }
+                self.open_job_action();
             }
             Action::OpenJobAllocation => {
-                self.message = Message::new("Opening job allocation not implemented");
+                self.open_job_allocation();
             }
             Action::OpenUserOptions => {
                 self.user_options_menu.activate();
             }
             Action::UpdateUserOptions => {
-                self.user_options = self.user_options_menu.to_user_option();
+                self.update_user_options();
             }
             Action::SortJobList => {
                 self.job_overview.sort();
             }
-            Action::JobOption(_action) => {
-                self.message = Message::new("Performing job action not implemented");
+            Action::JobOption(action) => {
+                self.handle_job_action(action.clone());
             }
             _ => {}
         };
         self.action = Action::None;
+    }
+
+    fn open_message(&mut self, message: Message) {
+        self.message = message;
+    }
+
+    fn open_job_overview(&mut self) {
+        self.message = Message::new("Opening job overview not implemented");
+    }
+
+    fn open_job_action(&mut self) {
+        match self.job_overview.get_jobname() {
+            Some(job_name) => {
+                self.job_actions_menu.activate(&job_name);
+            }
+            None => {
+                self.message = Message::new("No job selected");
+                self.message.kind = MessageKind::Error;
+            }
+        }
+    }
+
+    fn open_job_allocation(&mut self) {
+        self.message = Message::new("Opening job allocation not implemented");
+    }
+
+    fn update_user_options(&mut self) {
+        // check if refresh rate has changed
+        let old_rate = self.user_options.refresh_rate;
+        self.user_options = self.user_options_menu.to_user_option();
+        if old_rate != self.user_options.refresh_rate {
+            self.job_overview.refresh_rate = self.user_options.refresh_rate;
+            self.should_set_frame_rate = true;
+        }
+    }
+
+    fn handle_job_action(&mut self, action: JobActions) {
+        match action {
+            _ => {
+                self.message = Message::new("Job action not implemented");
+            }
+        }
     }
 
 }

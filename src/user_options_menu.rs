@@ -246,7 +246,7 @@ impl UserOptionsMenu {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.previous();
             },
-            KeyCode::Enter | KeyCode::Char('i') => {
+            KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char(' ') => {
                 self.entries[self.index as usize].on_enter();
                 *action = Action::UpdateUserOptions;
             },

@@ -32,7 +32,8 @@ fn main() -> Result<()> {
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(std::io::stderr());
     let terminal = Terminal::new(backend)?;
-    let events = EventHandler::new(250);
+    let tick_rate = app.user_options.refresh_rate as u64;
+    let events = EventHandler::new(tick_rate);
     let mut tui = Tui::new(terminal, events);
     tui.enter()?;
 
@@ -47,6 +48,11 @@ fn main() -> Result<()> {
             Event::Mouse(mouse_event) => mouse_input(&mut app, mouse_event),
             Event::Resize(_, _) => {}
         };
+        if app.should_set_frame_rate {
+            tui.events = EventHandler::new(app.user_options.refresh_rate as u64);
+            app.should_set_frame_rate = false;
+            println!("Frame rate set to: {}", app.user_options.refresh_rate);
+        }
     }
 
     // Exit the user interface.
