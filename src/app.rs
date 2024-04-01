@@ -33,6 +33,7 @@ pub struct App {
     pub should_redraw: bool,
     pub open_vim: bool,
     pub vim_path: Option<String>,
+    pub exit_command: Option<String>,
     pub job_overview: JobOverview,
     pub job_actions_menu: JobActionsMenu,
     pub message: Message,
@@ -55,6 +56,7 @@ impl App {
             should_redraw: true,
             open_vim: false,
             vim_path: None,
+            exit_command: None,
             job_overview: job_overview,
             job_actions_menu: JobActionsMenu::new(),
             message: Message::new_disabled(),
@@ -248,7 +250,16 @@ impl App {
     }
 
     fn go_workdir(&mut self) {
-        self.message = Message::new("Opening workdir not implemented");
+        let job = if let Some(job) = self.job_overview.get_job() {
+            job
+        } else {
+            self.message = Message::new("No job selected");
+            self.message.kind = MessageKind::Error;
+            return;
+        };
+        let command = format!("cd {}", job.workdir);
+        self.exit_command = Some(command);
+        self.should_quit = true;
     }
 
     fn ssh_to_node(&mut self) {

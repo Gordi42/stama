@@ -73,6 +73,12 @@ fn main() -> Result<()> {
     }
     // Exit the user interface.
     tui.exit()?;
+    match app.exit_command {
+        Some(command) => {
+            println!("{}", command);
+        }
+        None => {}
+    }
 
     Ok(())
 }
