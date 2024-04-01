@@ -1,5 +1,6 @@
 use color_eyre::eyre::Result;
 use ratatui::{backend::CrosstermBackend, Terminal};
+use std::process::{Command, Stdio};
 
 use crate::{
     app::App,
@@ -54,7 +55,14 @@ fn main() -> Result<()> {
             tui.events = EventHandler::new(app.user_options.refresh_rate as u64);
             app.should_set_frame_rate = false;
             println!("Frame rate set to: {}", app.user_options.refresh_rate);
+        };
+        if app.open_vim {
+            tui.exit()?;
+            open_vim();
+            app.open_vim = false;
+            tui.enter()?;
         }
+
     }
 
     // Exit the user interface.
@@ -64,3 +72,13 @@ fn main() -> Result<()> {
 }
 
 
+fn open_vim() {
+    let mut child = Command::new("nvim")
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn().expect("Failed to execute command");
+
+    // Wait for the process to finish
+    child.wait().expect("Failed to wait on child");
+}

@@ -3,6 +3,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use stoppable_thread;
 
 use color_eyre::Result;
 use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
@@ -22,16 +23,14 @@ pub enum Event {
 }
 
 /// Terminal event handler.
-#[derive(Debug)]
 pub struct EventHandler {
     /// Event sender channel.
     #[allow(dead_code)]
     sender: mpsc::Sender<Event>,
     /// Event receiver channel.
     receiver: mpsc::Receiver<Event>,
-    /// Event handler thread.
-    #[allow(dead_code)]
-    handler: thread::JoinHandle<()>,
+    // #[allow(dead_code)]
+    handler: stoppable_thread::StoppableHandle<()>,
 }
 
 impl EventHandler {
@@ -41,10 +40,9 @@ impl EventHandler {
         let (sender, receiver) = mpsc::channel();
         let handler = {
             let sender = sender.clone();
-            thread::spawn(move || {
+            stoppable_thread::spawn(move |stopped| {
                 let mut last_tick = Instant::now();
-                let mut running = true;
-                while running {
+                while !stopped.get() {
                     let timeout = tick_rate
                         .checked_sub(last_tick.elapsed())
                         .unwrap_or(tick_rate);
@@ -68,14 +66,14 @@ impl EventHandler {
                             _ => unimplemented!(),
                         };
                         if send_result.is_err() {
-                            running = false;
+                            break;
                         }
                     }
 
                     if last_tick.elapsed() >= tick_rate {
                         let send_result = sender.send(Event::Tick);
                         if send_result.is_err() {
-                            running = false;
+                            break;
                         }
                         last_tick = Instant::now();
                     }
@@ -95,6 +93,12 @@ impl EventHandler {
     /// there is no data available and it's possible for more data to be sent.
     pub fn next(&self) -> Result<Event> {
         Ok(self.receiver.recv()?)
+    }
+
+    pub fn stop(&self) {
+        let handle = &self.handler;
+        handle.stop();
+        // self.handler.stop();
     }
 }
 

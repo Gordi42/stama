@@ -31,6 +31,7 @@ pub struct App {
     pub should_quit: bool,
     pub should_set_frame_rate: bool,
     pub should_redraw: bool,
+    pub open_vim: bool,
     pub job_overview: JobOverview,
     pub job_actions_menu: JobActionsMenu,
     pub message: Message,
@@ -51,6 +52,7 @@ impl App {
             should_quit: false,
             should_set_frame_rate: false,
             should_redraw: true,
+            open_vim: false,
             job_overview: job_overview,
             job_actions_menu: JobActionsMenu::new(),
             message: Message::new_disabled(),
@@ -197,14 +199,7 @@ impl App {
     }
 
     fn open_log(&mut self) {
-        let mut child = Command::new("vim")
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn().expect("Failed to execute command");
-    
-        // Wait for the process to finish
-        child.wait().expect("Failed to wait on child");
+        self.open_vim = true;
         self.should_redraw = true;
         self.message = Message::new("Opening log not implemented");
     }
