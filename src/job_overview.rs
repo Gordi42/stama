@@ -267,7 +267,7 @@ impl JobOverview {
             "▶ Job: ".to_string(),
             job.id.clone(),
             job.name.clone(),
-            format_status(job),
+            job.status.to_string(),
             job.time.clone(),
             job.partition.clone(),
             job.nodes.to_string(),
@@ -360,7 +360,7 @@ impl JobOverview {
             Row::new(vec![
                 job.id.clone(),
                 job.name.clone(),
-                format_status(job),
+                job.status.to_string(),
                 format_time(job),
                 job.partition.clone(),
                 job.nodes.to_string(),
@@ -561,18 +561,6 @@ fn get_job_color(job: &Job) -> Color {
     }
 }
 
-fn format_status(job: &Job) -> String {
-    match job.status {
-        JobStatus::Unknown => "Unknown",
-        JobStatus::Running => "Running",
-        JobStatus::Pending => "Pending",
-        JobStatus::Completed => "Completed",
-        JobStatus::Completing => "Completing",
-        JobStatus::Failed => "Failed",
-        JobStatus::Timeout => "Timeout",
-        JobStatus::Cancelled => "Cancelled",
-    }.to_string()
-}
 
 fn format_time(job: &Job) -> String {
     let time_str = job.time.clone();

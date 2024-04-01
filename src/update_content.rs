@@ -190,17 +190,8 @@ fn update_job_content(job: Option<Job>, content: &mut Content) {
     if new_job.id != old_job.id {
         set_content_loading(content);
     } else {
-        match new_job.status {
-            JobStatus::Completed => {
-                set_content_no_info(content);
-            },
-            JobStatus::Cancelled => {
-                set_content_no_info(content);
-            },
-            JobStatus::Timeout => {
-                set_content_no_info(content);
-            },
-            _ => {},
+        if new_job.is_completed() {
+            set_content_no_info(content);
         }
     }
 }
@@ -211,8 +202,15 @@ fn set_content_loading(content: &mut Content) {
 }
 
 fn set_content_no_info(content: &mut Content) {
-    content.details_text = "No details available for completed jobs"
-        .to_string();
+    let mut text = "Job id: ".to_string() + &content.job.as_ref().unwrap().id;
+    text = text + "\nJob name: " + &content.job.as_ref().unwrap().name;
+    text = text + "\nJob status: " + &content.job.as_ref().unwrap().status.to_string();
+    text = text + "\nTime used: " + &content.job.as_ref().unwrap().time;
+    text = text + "\nPartition: " + &content.job.as_ref().unwrap().partition;
+    text = text + "\nNodes: " + &content.job.as_ref().unwrap().nodes.to_string();
+    text = text + "\nWorkdir: " + &content.job.as_ref().unwrap().workdir;
+    text = text + "\nCommand: " + &content.job.as_ref().unwrap().command;
+    content.details_text = text;
     content.log_text = "Slurm has no database entry of the output file for completed jobs."
         .to_string();
 }

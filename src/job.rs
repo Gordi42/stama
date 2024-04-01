@@ -26,6 +26,21 @@ impl JobStatus {
         }
     }
 }
+impl std::fmt::Display for JobStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let status = match self {
+            JobStatus::Unknown => "Unknown",
+            JobStatus::Running => "Running",
+            JobStatus::Pending => "Pending",
+            JobStatus::Completing => "Completing",
+            JobStatus::Completed => "Completed",
+            JobStatus::Timeout => "Timeout",
+            JobStatus::Cancelled => "Cancelled",
+            JobStatus::Failed => "Failed",
+        };
+        write!(f, "{}", status)
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Job {
