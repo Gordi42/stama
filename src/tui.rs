@@ -43,6 +43,7 @@ impl Tui {
     /// It enables the raw mode and sets terminal properties.
     pub fn enter(&mut self) -> Result<()> {
         Self::enter_alternate_screen()?;
+        self.events.start();
 
         // Define a custom panic hook to reset the terminal properties.
         // This way, you won't have your terminal messed up if an unexpected error happens.
@@ -93,6 +94,7 @@ impl Tui {
     pub fn exit(&mut self) -> Result<()> {
         Self::reset()?;
         self.terminal.show_cursor()?;
+        self.events.stop();
         Ok(())
     }
 }

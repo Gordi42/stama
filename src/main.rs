@@ -52,9 +52,8 @@ fn main() -> Result<()> {
             Event::Resize(_, _) => {}
         };
         if app.should_set_frame_rate {
-            tui.events = EventHandler::new(app.user_options.refresh_rate as u64);
+            tui.events.set_tick_rate(app.user_options.refresh_rate as u64);
             app.should_set_frame_rate = false;
-            println!("Frame rate set to: {}", app.user_options.refresh_rate);
         };
         if app.open_vim {
             tui.exit()?;
