@@ -97,6 +97,7 @@ impl App {
             }
             Action::SortJobList => {
                 self.job_overview.sort();
+                self.job_overview.set_index(0);
             }
             Action::JobOption(action) => {
                 self.handle_job_action(action.clone());

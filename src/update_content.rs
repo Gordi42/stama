@@ -177,8 +177,8 @@ fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Conte
 fn get_squeue_joblist(command: &str) -> Vec<Job> {
     let format_entries = vec![
         "JobID:16", "Name:16", "StateCompact:2", "TimeUsed:16", 
-        "PendingTime:16", "Partition:16", "NumNodes:8",];
-        // "WorkDir:256", "Command:256", "StdOut:256"];
+        "PendingTime:16", "Partition:16", "NumNodes:8",
+        "WorkDir:256", "Command:256", "StdOut:256"];
     let format = format_entries.join("|%|,");
     let command = format!("{} --Format=\",{},\"", command, format);
     let output = get_squeue_output(&command);
@@ -228,7 +228,12 @@ pub fn format_squeue_output(output: &str) -> Vec<Job> {
         };
         let partition = parts[5].to_string();
         let nodes = parts[6].parse::<u32>().unwrap_or(0);
-        joblist.push(Job::new(&id, &name, status, &time, &partition, nodes));
+        let workdir = parts[7].to_string();
+        let command = parts[8].to_string();
+        let output = parts[9].to_string();
+        joblist.push(Job::new(&id, &name, status, 
+                              &time, &partition, nodes,
+                              &workdir, &command, Some(output)));
     }
     joblist
 }
@@ -293,7 +298,9 @@ pub fn format_sacct_output(output: &str) -> Vec<Job> {
         };
         let time = line[3*17..4*17].trim().to_string();
         let nodes = line[5*17..6*17].trim().parse::<u32>().unwrap_or(0);
-        joblist.push(Job::new(&id, &name, status, &time, partition, nodes));
+        joblist.push(Job::new(&id, &name, status, 
+                              &time, partition, nodes,
+                              "", "", None));
     }
     joblist
 }
@@ -365,4 +372,26 @@ fn format_time_pending(time_str: &str) -> String {
     let minutes = (time_in_sec % 3600) / 60;
     let seconds = time_in_sec % 60;
     format!("{}-{:02}:{:02}:{:02}", days, hours, minutes, seconds)
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_log_path() {
+        let job_details = "
+JobId=9638603 JobName=dummy_name
+   NodeList=l[50321-50324,50327,50330,50333,50337-50338,50340-50341,50343]
+   BatchHost=l50321
+   Command=./path/to/command.run
+   WorkDir=/work/dir
+   StdErr=/std/LOG.err
+   StdIn=/dev/null
+   StdOut=/std/LOG.out";
+        let log_path = _get_log_path(job_details);
+        assert_eq!(log_path, Some("/std/LOG.out".to_string()));
+    }
 }

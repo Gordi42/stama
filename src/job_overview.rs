@@ -2,6 +2,7 @@ use ratatui::{
     prelude::*,
     style::{Color, Style},
     widgets::*,
+    layout::Flex,
 };
 use crossterm::event::{
     KeyCode, KeyEvent, MouseEventKind, MouseButton,};
@@ -15,6 +16,7 @@ use crate::user_options::UserOptions;
 use crate::update_content::{ContentUpdater};
 
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum WindowFocus {
     JobDetails,
     Log,
@@ -50,7 +52,7 @@ pub struct JobOverview {
     pub focus: WindowFocus,   // which part of the window is in focus
     pub joblist: Vec<Job>,    // the list of jobs
     pub index: usize,         // the index of the job in focus
-    pub state: ListState,     // the state of the job list
+    pub state: TableState,     // the state of the job list
     pub mouse_areas: MouseAreas, // the mouse areas of the window
     pub squeue_command: TextArea<'static>, // the squeue command
     pub edit_squeue: bool,    // if the squeue command is being edited
@@ -67,7 +69,7 @@ pub struct JobOverview {
 
 impl JobOverview {
     pub fn new(refresh_rate: usize) -> Self {
-        let mut state = ListState::default();
+        let mut state = TableState::default();
         state.select(Some(0));
         // create mouse areas with 6 categories
         let mut mouse_areas = MouseAreas::default();
@@ -139,7 +141,7 @@ impl JobOverview {
         }
         // get the index of the job in focus
         let index = self.joblist.iter().position(|job| job.id == id);
-        self.set_index(index.unwrap_or(0) as i32);
+        self.set_index_raw(index.unwrap_or(0) as i32);
     }
 
     pub fn get_job(&self) -> Option<&Job> {
@@ -182,7 +184,7 @@ impl JobOverview {
         }
         // check if there is a job with the same id
         let index = self.joblist.iter().position(|job| job.id == id);
-        self.set_index(index.unwrap_or(0) as i32);
+        self.set_index_raw(index.unwrap_or(0) as i32);
         self.sort();
     }
 
@@ -327,9 +329,6 @@ impl JobOverview {
         top_row.height = 1;
         self.mouse_areas.joblist_title = top_row;
         let mut joblist_area = block.inner(*area).clone();
-        joblist_area.y += 1;       // remove the header row
-        joblist_area.height -= 1;
-        self.mouse_areas.joblist = joblist_area;
 
         f.render_widget(block.clone(), *area);
 
@@ -346,38 +345,11 @@ impl JobOverview {
             return;
         }
 
-        let id_list   = map2column(&self.joblist, |job| job.id.clone());
-        let name_list = map2column(&self.joblist, |job| job.name.clone());
-        let stat_list = map2column(&self.joblist, |job| format_status(job));
-        let time_list = map2column(&self.joblist, |job| format_time(job));
-        let part_list = map2column(&self.joblist, |job| job.partition.clone());
-        let node_list = map2column(&self.joblist, |job| job.nodes.to_string());
+        // ----------------------------------------------
+        //  CREATE THE JOB LIST
+        // ----------------------------------------------
 
-        let constraints = [
-            Constraint::Min(get_column_width(&id_list,   8)),
-            Constraint::Min(get_column_width(&name_list, 10)),
-            Constraint::Min(get_column_width(&stat_list, 8)),
-            Constraint::Min(get_column_width(&time_list, 6)),
-            Constraint::Min(get_column_width(&part_list, 11)),
-            Constraint::Min(get_column_width(&node_list, 7))
-        ];
-
-        // create a layout for the job list
-        let layout = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(constraints.as_ref())
-            .split(block.inner(*area));
-
-        // update the mouse areas of the categories
-        for (i, area) in layout.iter().enumerate() {
-            let mut cat_area = area.clone();
-            cat_area.height = 1;
-            self.mouse_areas.categories[i] = cat_area;
-        }
-
-        let hc = get_job_color(&self.joblist[self.index]);
-        let state = &mut self.state;
-        
+        // Create the titles for the columns
         let mut title_names = vec!["ID", "Name", "Status", 
                                "Time", "Partition", "Nodes"];
         // modify the title names if the category is selected
@@ -394,13 +366,66 @@ impl JobOverview {
                            if self.reversed { "▲" } else { "▼" });
         title_names[cat_ind] = new_title.as_str();
 
-        let row_lists = vec![id_list, name_list, stat_list, 
-                             time_list, part_list, node_list];
+        // Create the rows for the job list
+        let rows = self.joblist.iter().map(|job| {
+            Row::new(vec![
+                job.id.clone(),
+                job.name.clone(),
+                format_status(job),
+                format_time(job),
+                job.partition.clone(),
+                job.nodes.to_string(),
+            ]).style(Style::default().fg(get_job_color(job)))
+        }).collect::<Vec<Row>>();
 
-        for i in 0..6 {
-            render_row(state, f, &layout[i], title_names[i], 
-                       row_lists[i].clone(), hc);
-        }
+        // Create the widths for the columns
+        let widths = [
+            Constraint::Min(8),
+            Constraint::Min(10),
+            Constraint::Min(8),
+            Constraint::Min(6),
+            Constraint::Min(11),
+            Constraint::Min(7),
+        ];
+
+        // set the flex and spacing for the columns
+
+        let flex = Flex::SpaceBetween;
+        let column_spacing = 1;
+
+        // get the rects for the columnss and update the mouse areas
+        let mut rects = Layout::horizontal(widths)
+            .flex(flex)
+            .spacing(column_spacing)
+            .split(joblist_area);
+        // set height of each rect to 1
+        rects = rects.iter().map(|rect| {
+            let mut r = rect.clone();
+            r.height = 1;
+            r
+        }).collect();
+        self.mouse_areas.categories = rects.to_vec();
+
+        // create the table
+
+        let table = Table::new(rows, widths)
+            .column_spacing(column_spacing)
+            .style(Style::new().blue())
+            .header(
+                Row::new(title_names)
+                .style(Style::new().bold())
+                )
+            .flex(flex) 
+            .highlight_style(Style::new().reversed());
+
+        // render the table
+        f.render_stateful_widget(table, joblist_area.clone(), &mut self.state);
+
+        // update the mouse areas
+        joblist_area.y += 1;       // remove the header row
+        joblist_area.height -= 1;
+        self.mouse_areas.joblist = joblist_area;
+        return;
 
     }
 
@@ -577,53 +602,6 @@ fn format_time(job: &Job) -> String {
 }
 
 
-fn get_column_width(column: &Vec<Line>, minimum: u16) -> u16 {
-    column.iter()
-        .map(|item| item.width()).max().unwrap_or(0)
-        .max(minimum.into()) as u16
-}
-
-fn map2column<F>(joblist: &Vec<Job>, map_fn: F) -> Vec<Line>
-where
-F: Fn(&Job) -> String,
-{
-    joblist.iter()
-        .map(|job| {
-            Line::styled(
-                map_fn(job), 
-                Style::default().fg(get_job_color(job)))
-                .alignment(Alignment::Right)
-        }).collect()
-}
-
-fn render_row(state: &mut ListState, 
-              f: &mut Frame, 
-              area: &Rect, title: &str, 
-              content: Vec<Line>,
-              highlight_color: Color) {
-    // create a bold styled centered title
-    let title = Span::styled(title, 
-                             Style::default().add_modifier(Modifier::BOLD));
-    let title = Paragraph::new(title)
-        .alignment(Alignment::Right);
-
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
-        .split(*area);
-
-    f.render_widget(title, layout[0]);
-
-    let item_list = List::new(content)
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD)
-                         .bg(highlight_color).fg(Color::Black));
-
-    // align the list to the right
-
-
-    f.render_stateful_widget(item_list, layout[1], state);
-}
-
 // ====================================================================
 //  USER INPUT
 // ====================================================================
@@ -712,13 +690,23 @@ impl JobOverview {
     }
 
     fn select_details(&mut self) {
-        self.focus = WindowFocus::JobDetails;
-        self.collapsed_bot = false;
+        // if the job details are already in focus, toggle collapse
+        if self.focus == WindowFocus::JobDetails {
+            self.collapsed_bot = !self.collapsed_bot;
+        } else {
+            self.focus = WindowFocus::JobDetails;
+            self.collapsed_bot = false;
+        }
     }
 
     fn select_log(&mut self) {
-        self.focus = WindowFocus::Log;
-        self.collapsed_bot = false;
+        // if the log is already in focus, toggle collapse
+        if self.focus == WindowFocus::Log {
+            self.collapsed_bot = !self.collapsed_bot;
+        } else {
+            self.focus = WindowFocus::Log;
+            self.collapsed_bot = false;
+        }
     }
 
     fn next_focus(&mut self) {
@@ -749,6 +737,18 @@ impl JobOverview {
 
     fn prev_job(&mut self) {
         self.set_index(self.index as i32 - 1);
+    }
+
+    pub fn set_index_raw(&mut self, index: i32) {
+        let job_len = self.joblist.len() as i32;
+        let mut new_index = index;
+        if index >= job_len {
+            new_index = 0;
+        } else if index < 0 {
+            new_index = job_len - 1;
+        } 
+        self.index = new_index as usize;
+        self.state.select(Some(self.index));
     }
 
     pub fn set_index(&mut self, index: i32) {
@@ -889,24 +889,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_get_log_path() {
-        let job_details = "
-JobId=9638603 JobName=dummy_name
-   NodeList=l[50321-50324,50327,50330,50333,50337-50338,50340-50341,50343]
-   BatchHost=l50321
-   Command=./path/to/command.run
-   WorkDir=/work/dir
-   StdErr=/std/LOG.err
-   StdIn=/dev/null
-   StdOut=/std/LOG.out";
-        let log_path = get_log_path(job_details);
-        assert_eq!(log_path, Some("/std/LOG.out".to_string()));
-    }
-
-    #[test]
     fn test_format_time() {
-        let mut job = Job::new(
-            "1", "job1", JobStatus::Running, "0-00:00:10", "partition1", 1);
+        let mut job = Job::new_default();
+        job.time = "0-00:00:10".to_string();
         assert_eq!(format_time(&job), "00:00:10");
         job.time = "1-00:00:10".to_string();
         assert_eq!(format_time(&job), "1-00:00:10");

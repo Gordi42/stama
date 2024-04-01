@@ -35,6 +35,9 @@ pub struct Job {
     pub time: String,       // time string
     pub partition: String,  // the partition the job is running on
     pub nodes: u32,         // the number of nodes the job is running on
+    pub workdir: String,    // the working directory of the job
+    pub command: String,    // the command the job is running
+    pub output: Option<String>, // the output of the job
 }
 
 // ====================================================================
@@ -43,7 +46,8 @@ pub struct Job {
 
 impl Job {
     pub fn new(id: &str, name: &str, status: JobStatus, 
-               time: &str, partition: &str, nodes: u32) -> Self {
+               time: &str, partition: &str, nodes: u32,
+               workdir: &str, command: &str, output: Option<String>) -> Self {
         Self {
             id: id.to_string(),
             name: name.to_string(),
@@ -51,6 +55,24 @@ impl Job {
             time: time.to_string(),
             partition: partition.to_string(),
             nodes: nodes,
+            workdir: workdir.to_string(),
+            command: command.to_string(),
+            output: output,
+        }
+    }
+
+    /// Create a random job (for testing purposes)
+    pub fn new_default() -> Self {
+        Self {
+            id: "123456".to_string(),
+            name: "jobname".to_string(),
+            status: JobStatus::Running,
+            time: "00:00:00".to_string(),
+            partition: "default".to_string(),
+            nodes: 1,
+            workdir: "/home/user".to_string(),
+            command: "/path/to/script".to_string(),
+            output: None,
         }
     }
 }
