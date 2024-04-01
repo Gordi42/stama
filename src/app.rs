@@ -8,7 +8,7 @@ use crate::job_actions::{JobActionsMenu, JobActions};
 use crate::user_options::UserOptions;
 use crate::user_options_menu::UserOptionsMenu;
 use crate::confirmation::Confirmation;
-use crate::job::Job;
+use crate::job::{Job, JobStatus};
 
 #[derive(Debug, Default, Clone)]
 pub enum Action {
@@ -263,6 +263,45 @@ impl App {
     }
 
     fn ssh_to_node(&mut self) {
+        let job = if let Some(job) = self.job_overview.get_job() {
+            job
+        } else {
+            self.message = Message::new("No job selected");
+            self.message.kind = MessageKind::Error;
+            return;
+        };
+        if job.status != JobStatus::Running {
+            self.message = Message::new("Job not running");
+            self.message.kind = MessageKind::Error;
+            return;
+        }
+        let com_stat = Command::new("squeue")
+            .arg("-j")
+            .arg(&job.id)
+            .arg("--Format=NodeList")
+            .arg("--noheader")
+            .output();
+        match com_stat {
+            Ok(output) => {
+                if !output.status.success() {
+                    let error_msg = String::from_utf8_lossy(&output.stderr);
+                    self.message = Message::new(&format!("Error getting node list: {}", error_msg));
+                    self.message.kind = MessageKind::Error;
+                    return;
+                }
+                let node_list = String::from_utf8_lossy(&output.stdout);
+                let node_list = node_list.trim().replace("[", "");
+                let mut node = node_list.split("-").collect::<Vec<&str>>()[0];
+                node = node.split(",").collect::<Vec<&str>>()[0];
+                let command = format!("ssh -Y {}", node);
+                self.exit_command = Some(command);
+                self.should_quit = true;
+            }
+            Err(e) => {
+                self.message = Message::new(&format!("Error getting node list: {}", e));
+                self.message.kind = MessageKind::Error;
+            }
+        }
         self.message = Message::new("SSH to node not implemented");
     }
 

@@ -190,18 +190,23 @@ impl JobActionsMenu {
             },
             KeyCode::Char('1') => {
                 self.set_index(0);
+                self.perform_action(_action);
             },
             KeyCode::Char('2') => {
                 self.set_index(1);
+                self.perform_action(_action);
             },
             KeyCode::Char('3') => {
                 self.set_index(2);
+                self.perform_action(_action);
             },
             KeyCode::Char('4') => {
                 self.set_index(3);
+                self.perform_action(_action);
             },
             KeyCode::Char('5') => {
                 self.set_index(4);
+                self.perform_action(_action);
             },
             
             _ => {}

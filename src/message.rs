@@ -94,6 +94,7 @@ impl Message {
         let [rect] = horizontal.areas(rect);
         self.rect = rect;
 
+        f.render_widget(Clear, rect);
         f.render_widget(paragraph, rect);
     }
 }
