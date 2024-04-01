@@ -195,10 +195,10 @@ impl JobOverview {
             // setup a thread to get the job details
             let (tx_jd, rx_jd) = mpsc::channel();
             let get_job_det: bool;
-            let job_id_clone = id.clone();
             let handle_jd = match self.get_job() {
                 Some(job) => {
                     get_job_det = true;
+                    let job_id_clone = job.id.clone();
                     thread::spawn(move || {
                         tx_jd.send(get_job_details(&job_id_clone)).unwrap();
                     })
@@ -623,7 +623,7 @@ impl JobOverview {
         let id_list   = map2column(&self.joblist, |job| job.id.clone());
         let name_list = map2column(&self.joblist, |job| job.name.clone());
         let stat_list = map2column(&self.joblist, |job| format_status(job));
-        let time_list = map2column(&self.joblist, |job| job.time.clone());
+        let time_list = map2column(&self.joblist, |job| format_time(job));
         let part_list = map2column(&self.joblist, |job| job.partition.clone());
         let node_list = map2column(&self.joblist, |job| job.nodes.to_string());
 
@@ -830,13 +830,26 @@ fn format_status(job: &Job) -> String {
     }.to_string()
 }
 
-// fn format_time(job: &Job) -> String {
-//     let time = job.time;
-//     let hours = time / 3600;
-//     let minutes = (time % 3600) / 60;
-//     let seconds = time % 60;
-//     format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
-// }
+fn format_time(job: &Job) -> String {
+    let time_str = job.time.clone();
+    
+    let parts: Vec<&str> = time_str.split('-').collect();
+    match parts.len() {
+        1 => {
+            parts[0].to_string()
+        }
+        2 => {
+            let days = parts[0].parse::<i32>().unwrap_or(0);
+            if days > 0 {
+                time_str
+            } else {
+                parts[1].to_string()
+            }
+        }
+        _ => "".to_string(),
+    }
+}
+
 
 fn get_column_width(column: &Vec<Line>, minimum: u16) -> u16 {
     column.iter()
@@ -1161,4 +1174,15 @@ JobId=9638603 JobName=dummy_name
         let log_path = get_log_path(job_details);
         assert_eq!(log_path, Some("/std/LOG.out".to_string()));
     }
+
+    #[test]
+    fn test_format_time() {
+        let mut job = Job::new(
+            "1", "job1", JobStatus::Running, "0-00:00:10", "partition1", 1);
+        assert_eq!(format_time(&job), "00:00:10");
+        job.time = "1-00:00:10".to_string();
+        assert_eq!(format_time(&job), "1-00:00:10");
+    }
 }
+
+
