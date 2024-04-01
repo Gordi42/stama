@@ -49,9 +49,6 @@ impl UserOptionsMenu {
             TextField::new(
                 "External editor", 
                 TextFieldType::Text(list.external_editor)),
-            TextField::new(
-                "Create dummy jobs", 
-                TextFieldType::Boolean(list.dummy_jobs)),
         ];
 
         Self {
@@ -106,10 +103,6 @@ impl UserOptionsMenu {
         user_options.external_editor = match &self.entries[4].field_type {
             TextFieldType::Text(s) => s.clone(),
             _ => "vim".to_string(),
-        };
-        user_options.dummy_jobs = match &self.entries[5].field_type {
-            TextFieldType::Boolean(b) => *b,
-            _ => false,
         };
         user_options
     }

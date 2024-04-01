@@ -157,39 +157,22 @@ impl JobOverview {
             true => "no_job".to_string(),
             false => self.joblist[self.index].id.clone(),
         };
-        if user_options.dummy_jobs {
-            // self.joblist = vec![
-            //     Job::new(1, "job1", JobStatus::Running, 10, "partition1", 1),
-            //     Job::new(13, "job2", JobStatus::Pending, 235, "partition2", 2),
-            //     Job::new(15, "job3", JobStatus::Completed, 5123, "partition3", 120),
-            //     Job::new(12314, "job4", JobStatus::Failed, 123, "partition4", 1),
-            //     Job::new(133, "job5", JobStatus::Running, 10, "partition1", 1),
-            //     Job::new(1134, "job6", JobStatus::Pending, 235, "partition2", 2),
-            //     Job::new(2, "job7", JobStatus::Completed, 5123, "partition3", 120),
-            //     Job::new(194, "job8", JobStatus::Failed, 123, "partition4", 1),
-            //     Job::new(139, "job9", JobStatus::Running, 10, "partition1", 1),
-            //     Job::new(9577782, "job10", JobStatus::Pending, 9577782, "partition2", 2),];
-        } else {
-            let job = self.get_job().cloned();
-            let command = self.get_squeue_command();
-            match self.content_updater.tick(
-                job, command, user_options.clone()) {
-                Some(content) => {
-                    self.joblist = content.job_list;
-                    self.job_details = content.details_text;
-                    self.log = content.log_text;
-                }
-                None => { }
+        let job = self.get_job().cloned();
+        let command = self.get_squeue_command();
+        match self.content_updater.tick(
+            job, command, user_options.clone()) {
+            Some(content) => {
+                self.joblist = content.job_list;
+                self.job_details = content.details_text;
+                self.log = content.log_text;
             }
+            None => { }
         }
         // check if there is a job with the same id
         let index = self.joblist.iter().position(|job| job.id == id);
         self.set_index_raw(index.unwrap_or(0) as i32);
         self.sort();
     }
-
-
-
 
         
 }

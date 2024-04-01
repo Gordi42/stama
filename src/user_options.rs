@@ -11,7 +11,6 @@ pub struct UserOptions {
     pub confirm_before_quit: bool,  // Confirm before quitting
     pub confirm_before_kill: bool,  // Confirm before killing a job
     pub external_editor: String,    // External editor command (e.g. "vim")
-    pub dummy_jobs: bool,            // if dummy jobs should be created
 }
 
 impl Default for UserOptions {
@@ -22,7 +21,6 @@ impl Default for UserOptions {
             confirm_before_quit: false,
             confirm_before_kill: true,
             external_editor: "vim".to_string(),
-            dummy_jobs: false,
         }
     }
 }
