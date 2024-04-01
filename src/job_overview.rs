@@ -132,7 +132,7 @@ impl JobOverview {
                 self.joblist.sort_by(|a, b| a.partition.cmp(&b.partition));
             },
             SortCategory::Nodes => {
-                self.joblist.sort_by(|a, b| a.nodes.cmp(&b.nodes));
+                self.joblist.sort_by(|a, b| b.nodes.cmp(&a.nodes));
             },
         }
         // reverse the list if needed
@@ -350,8 +350,12 @@ impl JobOverview {
         // ----------------------------------------------
 
         // Create the titles for the columns
-        let mut title_names = vec!["ID", "Name", "Status", 
-                               "Time", "Partition", "Nodes"];
+        let mut title_names = vec![Span::raw("ID"), 
+                                   Span::raw("Name"), 
+                                   Span::raw("Status"), 
+                                   Span::raw("Time"), 
+                                   Span::raw("Partition"), 
+                                   Span::raw("Nodes")];
         // modify the title names if the category is selected
         let cat_ind = match self.sort_category {
             SortCategory::Id => 0,
@@ -361,10 +365,12 @@ impl JobOverview {
             SortCategory::Partition => 4,
             SortCategory::Nodes => 5,
         };
+        let title_string: String = title_names[cat_ind].content.clone().into();
         let new_title = format!("{} {}", 
-                           title_names[cat_ind],
+                           title_string,
                            if self.reversed { "▲" } else { "▼" });
-        title_names[cat_ind] = new_title.as_str();
+        title_names[cat_ind] = Span::styled(
+            new_title, Style::default().fg(Color::Blue));
 
         // Create the rows for the job list
         let rows = self.joblist.iter().map(|job| {
@@ -410,7 +416,6 @@ impl JobOverview {
 
         let table = Table::new(rows, widths)
             .column_spacing(column_spacing)
-            .style(Style::new().blue())
             .header(
                 Row::new(title_names)
                 .style(Style::new().bold())
