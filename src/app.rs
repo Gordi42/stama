@@ -1,4 +1,4 @@
-use std::process::{Command, Stdio};
+use std::process::{Command};
 
 use crate::{
     job_overview::JobOverview,
@@ -32,6 +32,7 @@ pub struct App {
     pub should_set_frame_rate: bool,
     pub should_redraw: bool,
     pub open_vim: bool,
+    pub vim_path: Option<String>,
     pub job_overview: JobOverview,
     pub job_actions_menu: JobActionsMenu,
     pub message: Message,
@@ -53,6 +54,7 @@ impl App {
             should_set_frame_rate: false,
             should_redraw: true,
             open_vim: false,
+            vim_path: None,
             job_overview: job_overview,
             job_actions_menu: JobActionsMenu::new(),
             message: Message::new_disabled(),
@@ -199,9 +201,22 @@ impl App {
     }
 
     fn open_log(&mut self) {
+        let job = if let Some(job) = self.job_overview.get_job() {
+            job
+        } else {
+            self.message = Message::new("No job selected");
+            self.message.kind = MessageKind::Error;
+            return;
+        };
+        let log_path = if let Some(log_path) = &job.output {
+            log_path
+        } else {
+            self.message = Message::new("No log file found");
+            self.message.kind = MessageKind::Error;
+            return;
+        };
+        self.vim_path = Some(log_path.clone());
         self.open_vim = true;
-        self.should_redraw = true;
-        self.message = Message::new("Opening log not implemented");
     }
 
     fn open_submissions(&mut self) {

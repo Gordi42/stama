@@ -56,14 +56,21 @@ fn main() -> Result<()> {
             app.should_set_frame_rate = false;
         };
         if app.open_vim {
-            tui.exit()?;
-            open_vim();
-            app.open_vim = false;
-            tui.enter()?;
+            let editor = app.user_options.external_editor.as_str();
+            match app.vim_path {
+                Some(path) => {
+                    tui.exit()?;
+                    open_editor(&editor, &path);
+                    app.open_vim = false;
+                    app.vim_path = None;
+                    tui.enter()?;
+                }
+                None => {
+                }
+            }
         }
 
     }
-
     // Exit the user interface.
     tui.exit()?;
 
@@ -71,8 +78,14 @@ fn main() -> Result<()> {
 }
 
 
-fn open_vim() {
-    let mut child = Command::new("nvim")
+fn open_editor(editor: &str, path: &str) {
+    let mut parts = editor.trim().split_whitespace();
+    let program = parts.next().unwrap_or(" ");
+    let args: Vec<&str> = parts.collect();
+
+    let mut child = Command::new(program)
+        .args(args)
+        .arg(path)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
