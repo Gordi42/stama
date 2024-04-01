@@ -13,6 +13,7 @@ pub mod event;
 pub mod ui;
 pub mod tui;
 pub mod update;
+pub mod update_content;
 pub mod mouse_input;
 pub mod job;
 pub mod job_overview;

@@ -203,7 +203,7 @@ impl App {
             .spawn().expect("Failed to execute command");
     
         // Wait for the process to finish
-        let exit_status = child.wait().expect("Failed to wait on child");
+        child.wait().expect("Failed to wait on child");
         self.should_redraw = true;
         self.message = Message::new("Opening log not implemented");
     }
