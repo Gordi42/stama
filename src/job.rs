@@ -29,7 +29,7 @@ impl JobStatus {
 
 #[derive(Debug, Clone, Default)]
 pub struct Job {
-    pub id: u32,            // the job id
+    pub id: String,         // the job id
     pub name: String,       // the name of the job
     pub status: JobStatus,  // the status of the job
     pub time: String,       // time string
@@ -42,10 +42,10 @@ pub struct Job {
 // ====================================================================
 
 impl Job {
-    pub fn new(id: u32, name: &str, status: JobStatus, 
+    pub fn new(id: &str, name: &str, status: JobStatus, 
                time: &str, partition: &str, nodes: u32) -> Self {
         Self {
-            id,
+            id: id.to_string(),
             name: name.to_string(),
             status: status,
             time: time.to_string(),
