@@ -297,7 +297,8 @@ pub fn get_sacct_output(command: &str) -> String {
 
     let entries = vec![
         "JobID%16", "JobName%16", "State%16", 
-        "Elapsed%16", "Partition%16", "NNodes%16",];
+        "Elapsed%16", "Partition%16", "NNodes%16",
+        "WorkDir%256", "SubmitLine%256"];
     let format = entries.join(",");
     let format_arg = format!("--format={}", format);
 
@@ -344,9 +345,11 @@ pub fn format_sacct_output(output: &str) -> Vec<Job> {
         };
         let time = line[3*17..4*17].trim().to_string();
         let nodes = line[5*17..6*17].trim().parse::<u32>().unwrap_or(0);
+        let workdir = line[6*17..6*17+257].trim().to_string();
+        let command = line[6*17+257..6*17+2*257].trim().to_string();
         joblist.push(Job::new(&id, &name, status, 
                               &time, partition, nodes,
-                              "", "", None));
+                              &workdir, &command, None));
     }
     joblist
 }

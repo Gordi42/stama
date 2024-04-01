@@ -220,7 +220,31 @@ impl App {
     }
 
     fn open_submissions(&mut self) {
-        self.message = Message::new("Opening submissions not implemented");
+        let job = if let Some(job) = self.job_overview.get_job() {
+            job
+        } else {
+            self.message = Message::new("No job selected");
+            self.message.kind = MessageKind::Error;
+            return;
+        };
+        if job.command == "(null)" {
+            self.message = Message::new("No submission script found");
+            self.message.kind = MessageKind::Error;
+            return;
+        }
+        let parts = job.command.split_whitespace().collect::<Vec<&str>>();
+        if parts.len() == 0 {
+            self.message = Message::new("No submission script found");
+            self.message.kind = MessageKind::Error;
+            return;
+        }
+        if job.is_completed() {
+            let mes = format!("Job was submitted with: \n {}", &job.command);
+            self.message = Message::new(&mes);
+            return;
+        }
+        self.vim_path = Some(job.command.clone());
+        self.open_vim = true;
     }
 
     fn go_workdir(&mut self) {

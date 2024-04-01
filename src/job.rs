@@ -85,6 +85,16 @@ impl Job {
     pub fn get_jobname(&self) -> String {
         self.name.clone()
     }
+
+    pub fn is_completed(&self) -> bool {
+        match self.status {
+            JobStatus::Completed => true,
+            JobStatus::Failed => true,
+            JobStatus::Timeout => true,
+            JobStatus::Cancelled => true,
+            _ => false,
+        }
+    }
 }
 
 
