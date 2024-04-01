@@ -7,6 +7,7 @@ use crate::{
 use crate::job_actions::{JobActionsMenu, JobActions};
 use crate::user_options::UserOptions;
 use crate::user_options_menu::UserOptionsMenu;
+use crate::help::HelpMenu;
 use crate::confirmation::Confirmation;
 use crate::job::{Job, JobStatus};
 
@@ -20,6 +21,7 @@ pub enum Action {
     OpenJobAllocation,
     OpenJobOverview,
     OpenUserOptions,
+    OpenHelpMenu(usize),
     UpdateUserOptions,
     OpenMessage(Message),
     SortJobList,
@@ -36,6 +38,7 @@ pub struct App {
     pub exit_command: Option<String>,
     pub job_overview: JobOverview,
     pub job_actions_menu: JobActionsMenu,
+    pub help_menu: HelpMenu,
     pub message: Message,
     pub confirmation: Confirmation,
     pub user_options_menu: UserOptionsMenu,
@@ -59,6 +62,7 @@ impl App {
             exit_command: None,
             job_overview: job_overview,
             job_actions_menu: JobActionsMenu::new(),
+            help_menu: HelpMenu::new(),
             message: Message::new_disabled(),
             confirmation: Confirmation::new_disabled(),
             user_options_menu: UserOptionsMenu::load(),
@@ -97,6 +101,9 @@ impl App {
             }
             Action::OpenUserOptions => {
                 self.user_options_menu.activate();
+            }
+            Action::OpenHelpMenu(selected_category) => {
+                self.open_help_menu(*selected_category);
             }
             Action::UpdateUserOptions => {
                 self.update_user_options();
@@ -148,6 +155,10 @@ impl App {
 
     fn open_job_allocation(&mut self) {
         self.message = Message::new("Opening job allocation not implemented");
+    }
+
+    fn open_help_menu(&mut self, selected_category: usize) {
+        self.help_menu.open(selected_category);
     }
 
     fn update_user_options(&mut self) {

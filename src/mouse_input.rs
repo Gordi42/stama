@@ -71,6 +71,7 @@ pub fn mouse_input(app: &mut App, mouse_event: MouseEvent) {
 
     app.message.mouse_input(&mut app.action, &mut app.mouse_input);
     app.confirmation.mouse_input(&mut app.action, &mut app.mouse_input);
+    app.help_menu.mouse_input(&mut app.action, &mut app.mouse_input);
     app.user_options_menu.mouse_input(&mut app.action, &mut app.mouse_input);
     app.job_actions_menu.mouse_input(&mut app.action, &mut app.mouse_input);
 

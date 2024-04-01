@@ -188,6 +188,9 @@ impl JobActionsMenu {
             KeyCode::Enter | KeyCode::Char('l') => {
                 self.perform_action(_action);
             },
+            KeyCode::Char('?') => {
+                *_action = Action::OpenHelpMenu(1);
+            },
             KeyCode::Char('1') => {
                 self.set_index(0);
                 self.perform_action(_action);

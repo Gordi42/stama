@@ -165,7 +165,7 @@ impl UserOptionsMenu {
         let [rect] = vertical.areas(f.size());
         let [rect] = horizontal.areas(rect);
         self.rect = rect;
-        self.max_height = rect.height - 2;
+        self.max_height = rect.height.saturating_sub(2);
 
         // clear the rect
         f.render_widget(Clear, rect); //this clears out the background
@@ -242,6 +242,9 @@ impl UserOptionsMenu {
             KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char(' ') => {
                 self.entries[self.index as usize].on_enter();
                 *action = Action::UpdateUserOptions;
+            },
+            KeyCode::Char('?') => {
+                *action = Action::OpenHelpMenu(3);
             },
             
             _ => {}

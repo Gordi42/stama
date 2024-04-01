@@ -22,6 +22,7 @@ pub mod job_actions;
 pub mod text_field;
 pub mod user_options;
 pub mod user_options_menu;
+pub mod help;
 pub mod message;
 pub mod confirmation;
 

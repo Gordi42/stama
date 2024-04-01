@@ -653,6 +653,9 @@ impl JobOverview {
             KeyCode::Char('o') => {
                 *action = Action::OpenUserOptions;
             },
+            KeyCode::Char('?') => {
+                *action = Action::OpenHelpMenu(0);
+            },
             // Collapsing/Extending the joblist
             KeyCode::Char('m') => {
                 self.collapsed_top = !self.collapsed_top;
