@@ -162,17 +162,17 @@ impl JobOverview {
             false => self.joblist[self.index].id,
         };
         if user_options.dummy_jobs {
-            self.joblist = vec![
-                Job::new(1, "job1", JobStatus::Running, 10, "partition1", 1),
-                Job::new(13, "job2", JobStatus::Pending, 235, "partition2", 2),
-                Job::new(15, "job3", JobStatus::Completed, 5123, "partition3", 120),
-                Job::new(12314, "job4", JobStatus::Failed, 123, "partition4", 1),
-                Job::new(133, "job5", JobStatus::Running, 10, "partition1", 1),
-                Job::new(1134, "job6", JobStatus::Pending, 235, "partition2", 2),
-                Job::new(2, "job7", JobStatus::Completed, 5123, "partition3", 120),
-                Job::new(194, "job8", JobStatus::Failed, 123, "partition4", 1),
-                Job::new(139, "job9", JobStatus::Running, 10, "partition1", 1),
-                Job::new(9577782, "job10", JobStatus::Pending, 9577782, "partition2", 2),];
+            // self.joblist = vec![
+            //     Job::new(1, "job1", JobStatus::Running, 10, "partition1", 1),
+            //     Job::new(13, "job2", JobStatus::Pending, 235, "partition2", 2),
+            //     Job::new(15, "job3", JobStatus::Completed, 5123, "partition3", 120),
+            //     Job::new(12314, "job4", JobStatus::Failed, 123, "partition4", 1),
+            //     Job::new(133, "job5", JobStatus::Running, 10, "partition1", 1),
+            //     Job::new(1134, "job6", JobStatus::Pending, 235, "partition2", 2),
+            //     Job::new(2, "job7", JobStatus::Completed, 5123, "partition3", 120),
+            //     Job::new(194, "job8", JobStatus::Failed, 123, "partition4", 1),
+            //     Job::new(139, "job9", JobStatus::Running, 10, "partition1", 1),
+            //     Job::new(9577782, "job10", JobStatus::Pending, 9577782, "partition2", 2),];
         } else {
             let command = self.get_squeue_command();
             // setup a thread to get the joblist from squeue
@@ -289,7 +289,13 @@ fn whoami() -> String {
 }
 
 fn get_squeue_joblist(command: &str) -> Vec<Job> {
-    let output = get_squeue_output(command);
+    let format_entries = vec![
+        "JobID:16", "Name:16", "StateCompact:2", "TimeUsed:16", 
+        "PendingTime:16", "Partition:16", "NumNodes:8",];
+        // "WorkDir:256", "Command:256", "StdOut:256"];
+    let format = format_entries.join("|%|,");
+    let command = format!("{} --Format=\",{},\"", command, format);
+    let output = get_squeue_output(&command);
     format_squeue_output(&output)
 }
 
@@ -320,22 +326,23 @@ pub fn get_squeue_output(command: &str) -> String {
 pub fn format_squeue_output(output: &str) -> Vec<Job> {
     let mut joblist = vec![];
     for line in output.lines().skip(1) {
-        let parts = line.split_whitespace().collect::<Vec<&str>>();
-        if parts.len() < 8 { continue; }
-        let id = parts[0].parse::<u32>().unwrap_or(0);
-        let partition = parts[1].to_string();
-        let name = parts[2].to_string();
-        let status = match parts[4] {
+        let parts = line.split("|%|").map(|s| s.trim()).collect::<Vec<&str>>();
+        // if parts.len() < 11 { continue; }
+        let id = parts[0].replace(" ", "").parse::<u32>().unwrap_or(0);
+        let name = parts[1].to_string();
+        let status = match parts[2] {
             "R" => JobStatus::Running,
             "PD" => JobStatus::Pending,
-            "CD" => JobStatus::Completed,
             "CG" => JobStatus::Completing,
-            "F" => JobStatus::Failed,
             _ => JobStatus::Unknown,
         };
-        let time = time_string_to_seconds(parts[5]);
+        let time = match status {
+            JobStatus::Pending => parts[4].to_string(),
+            _ => format_time_used(parts[3]),
+        };
+        let partition = parts[5].to_string();
         let nodes = parts[6].parse::<u32>().unwrap_or(0);
-        joblist.push(Job::new(id, &name, status, time, &partition, nodes));
+        joblist.push(Job::new(id, &name, status, &time, &partition, nodes));
     }
     joblist
 }
@@ -351,8 +358,15 @@ pub fn get_sacct_output(command: &str) -> String {
     let _program = parts.next().unwrap_or(" ");
     let args: Vec<&str> = parts.collect();
 
+    let entries = vec![
+        "JobID%16", "JobName%16", "State%16", 
+        "Elapsed%16", "Partition%16", "NNodes%16",];
+    let format = entries.join(",");
+    let format_arg = format!("--format={}", format);
+
     let command_stat = Command::new("sacct")
         .args(args)
+        .args(&[format_arg, "-n".to_string()])
         .output();
     match command_stat {
         Ok(output) => {
@@ -371,28 +385,33 @@ pub fn get_sacct_output(command: &str) -> String {
 pub fn format_sacct_output(output: &str) -> Vec<Job> {
     let mut joblist = vec![];
     for line in output.lines().skip(2) {
-        let parts = line.split_whitespace().collect::<Vec<&str>>();
-        if parts.len() < 7 { continue; }
-        let id = match parts[0].parse::<u32>() {
-            Ok(id) => id,
-            Err(_) => continue,
+
+        let partition = line[4*17..5*17].trim();
+        if partition.is_empty() { continue; }
+        let id = line[0..17].trim().parse::<u32>().unwrap_or(0);
+        let name = line[17..2*17].trim().to_string();
+        let status_text = line[2*17..3*17].trim();
+        let status = if status_text.starts_with("COMPLETED") {
+            JobStatus::Completed
+        } else if status_text.starts_with("TIMEOUT") {
+            JobStatus::Timeout
+        } else if status_text.starts_with("CANCELLED") {
+            JobStatus::Cancelled
+        } else if status_text.starts_with("RUNNING") {
+            continue;
+        } else if status_text.starts_with("PENDING") {
+            continue;
+        }
+        else {
+            JobStatus::Unknown
         };
-        let partition = parts[2].to_string();
-        let name = parts[1].to_string();
-        let status = match parts[5] {
-            "RUNNING" => continue,
-            "TIMEOUT" => JobStatus::Timeout,
-            "CANCELLED+" => JobStatus::Cancelled,
-            "COMPLETED" => JobStatus::Completed,
-            "PENDING" => continue,
-            _ => JobStatus::Unknown,
-        };
-        let time = 0;
-        let nodes = 0;
-        joblist.push(Job::new(id, &name, status, time, &partition, nodes));
+        let time = line[3*17..4*17].trim().to_string();
+        let nodes = line[5*17..6*17].trim().parse::<u32>().unwrap_or(0);
+        joblist.push(Job::new(id, &name, status, &time, partition, nodes));
     }
     joblist
 }
+
 
 pub fn get_job_details(job_id: &str) -> String {
     let args = vec!["show", "job", &job_id];
@@ -441,26 +460,16 @@ fn get_log_tail(log_path: &str, lines: usize) -> String {
     }
 }
 
-fn time_string_to_seconds(time_str: &str) -> u32 {
+fn format_time_used(time_str: &str) -> String {
     // format the time string in D-HH:MM:SS
-    let time_str = match time_str.len() {
-        1 => format!("0-00:00:0{}", time_str),
-        2 => format!("0-00:00:{}", time_str),
-        3 => format!("0-00:00{}", time_str),
-        4 => format!("0-00:0{}", time_str),
-        5 => format!("0-00:{}", time_str),
-        6 => format!("0-00{}", time_str),
-        7 => format!("0-0{}", time_str),
-        8 => format!("0-{}", time_str),
-        9 => format!("0{}", time_str),
-        10 => time_str.to_string(),
-        _ => return 0,
-    };
-    let days = time_str[0..1].parse::<u32>().unwrap_or(0);
-    let hours = time_str[2..4].parse::<u32>().unwrap_or(0);
-    let minutes = time_str[5..7].parse::<u32>().unwrap_or(0);
-    let seconds = time_str[8..10].parse::<u32>().unwrap_or(0);
-    days * 86400 + hours * 3600 + minutes * 60 + seconds
+    let mut time_output = "0-00:00:00".to_string();
+    if time_str.len() <= time_output.len() {
+        let start_ind = time_output.len() - time_str.len();
+        time_output.replace_range(start_ind.., &time_str);
+    } else {
+        time_output = time_str.to_string();
+    }
+    time_output
 }
 
 
@@ -539,7 +548,7 @@ impl JobOverview {
             job.id.to_string(),
             job.name.clone(),
             format_status(job),
-            format_time(job),
+            job.time.clone(),
             job.partition.clone(),
             job.nodes.to_string(),
         ];
@@ -605,7 +614,7 @@ impl JobOverview {
         let id_list   = map2column(&self.joblist, |job| job.id.to_string());
         let name_list = map2column(&self.joblist, |job| job.name.clone());
         let stat_list = map2column(&self.joblist, |job| format_status(job));
-        let time_list = map2column(&self.joblist, |job| format_time(job));
+        let time_list = map2column(&self.joblist, |job| job.time.clone());
         let part_list = map2column(&self.joblist, |job| job.partition.clone());
         let node_list = map2column(&self.joblist, |job| job.nodes.to_string());
 
@@ -812,13 +821,13 @@ fn format_status(job: &Job) -> String {
     }.to_string()
 }
 
-fn format_time(job: &Job) -> String {
-    let time = job.time;
-    let hours = time / 3600;
-    let minutes = (time % 3600) / 60;
-    let seconds = time % 60;
-    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
-}
+// fn format_time(job: &Job) -> String {
+//     let time = job.time;
+//     let hours = time / 3600;
+//     let minutes = (time % 3600) / 60;
+//     let seconds = time % 60;
+//     format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+// }
 
 fn get_column_width(column: &Vec<Line>, minimum: u16) -> u16 {
     column.iter()

@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::{
     job_overview::JobOverview,
@@ -196,6 +196,15 @@ impl App {
     }
 
     fn open_log(&mut self) {
+        let mut child = Command::new("vim")
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn().expect("Failed to execute command");
+    
+        // Wait for the process to finish
+        let exit_status = child.wait().expect("Failed to wait on child");
+        self.should_redraw = true;
         self.message = Message::new("Opening log not implemented");
     }
 
