@@ -423,7 +423,7 @@ impl JobOverview {
 
         // update the mouse areas
         joblist_area.y += 1;       // remove the header row
-        joblist_area.height -= 1;
+        joblist_area.height = joblist_area.height.saturating_sub(1);
         self.mouse_areas.joblist = joblist_area;
         return;
 
@@ -527,9 +527,14 @@ impl JobOverview {
     }
 
     fn render_log(&self, f: &mut Frame, area: &Rect) {
-        let paragraph = Paragraph::new(self.log.clone())
+        let mut paragraph = Paragraph::new(self.log.clone())
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true });
+
+        // calculate the scroll offset such that the last line is visible
+        let lines = paragraph.line_count(area.width);
+        let offset = (lines as u16).saturating_sub(self.log_height);
+        paragraph = paragraph.scroll((offset, 0));
 
         f.render_widget(paragraph, *area);
     }

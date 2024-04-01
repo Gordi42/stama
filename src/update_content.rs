@@ -45,13 +45,15 @@ impl ContentUpdater {
     pub fn tick(&mut self, job: Option<Job>, command: String, 
                 options: UserOptions) -> Option<Content> {
         // check if there is already a job queued
+        let job_clone = job.clone();
         // if not send the new job
         match &self.my_process {
             Some(my_process) => {
                 // try to receive the content
                 match my_process.receiver.try_recv() {
-                    Ok(content) => {
+                    Ok(mut content) => {
                         self.start_new_process(job, command, options);
+                        update_job_content(job_clone, &mut content);
                         Some(content)
                     }
                     Err(_) => {
@@ -101,38 +103,33 @@ fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Conte
     };
     // setup a thread to get the job details
     let (tx_jd, rx_jd) = mpsc::channel();
-    let get_job_det: bool;
     let handle_jd = match job {
         Some(ref job) => {
-            get_job_det = true;
             let job_id_clone = job.id.clone();
             thread::spawn(move || {
                 tx_jd.send(get_job_details(&job_id_clone)).unwrap();
             })
         },
         None => {
-            get_job_det = false;
             thread::spawn(|| {})
         }
     };
     // setup a thread to get the log
-    // let (tx_log, rx_log) = mpsc::channel();
-    // let handle_log = match get_job_det {
-    //     true => {
-    //         let job_details = self.job_details.clone();
-    //         let log_len = self.log_height;
-    //         thread::spawn(move || {
-    //             let log_path = match get_log_path(&job_details) {
-    //                 Some(path) => path,
-    //                 None => {
-    //                     return tx_log.send("No log file found.".to_string()).unwrap()
-    //                 }
-    //             };
-    //             tx_log.send(get_log_tail(&log_path, log_len.into())).unwrap();
-    //         })
-    //     },
-    //     false => thread::spawn(|| {}),
-    // };
+    let (tx_log, rx_log) = mpsc::channel();
+    let handle_log = match job {
+        Some(ref job) => {
+            match job.output {
+                Some(ref output) => {
+                    let log_path = output.clone();
+                    thread::spawn(move || {
+                        tx_log.send(get_log_tail(&log_path)).unwrap();
+                    })
+                },
+                None => thread::spawn(|| {}),
+            }
+        },
+        None => thread::spawn(|| {}),
+    };
 
     // collect the joblist from squeue
     let mut joblist = rx_sq.recv().unwrap();
@@ -143,12 +140,21 @@ fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Conte
         handle_sa.join().unwrap();
     }
     let mut details_text = "No job selected".to_string();
+    let mut log_text = "No logfile available".to_string();
     // collect the job details
-    if get_job_det {
-        details_text = rx_jd.recv().unwrap();
-        handle_jd.join().unwrap();
-        // self.log = rx_log.recv().unwrap();
-        // handle_log.join().unwrap();
+    match job {
+        Some(ref job) => {
+            details_text = rx_jd.recv().unwrap();
+            handle_jd.join().unwrap();
+            match job.output {
+                Some(_) => {
+                    log_text = rx_log.recv().unwrap();
+                    handle_log.join().unwrap();
+                },
+                None => {},
+            }
+        },
+        None => {},
     }
     // if a job is JobStatus::Completing, another job JobStatus::Completed exist
     // remove the JobStatus::Completed job
@@ -169,14 +175,52 @@ fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Conte
         }
     }
 
-    let log_text = String::new();
     Content::new(job, joblist, details_text, log_text)
+}
+
+fn update_job_content(job: Option<Job>, content: &mut Content) {
+    let new_job = match job {
+        Some(job) => job,
+        None => return,
+    };
+    let old_job = match &content.job {
+        Some(job) => job.clone(),
+        None => return,
+    };
+    if new_job.id != old_job.id {
+        set_content_loading(content);
+    } else {
+        match new_job.status {
+            JobStatus::Completed => {
+                set_content_no_info(content);
+            },
+            JobStatus::Cancelled => {
+                set_content_no_info(content);
+            },
+            JobStatus::Timeout => {
+                set_content_no_info(content);
+            },
+            _ => {},
+        }
+    }
+}
+
+fn set_content_loading(content: &mut Content) {
+    content.details_text = "loading...".to_string();
+    content.log_text = "loading...".to_string();
+}
+
+fn set_content_no_info(content: &mut Content) {
+    content.details_text = "No details available for completed jobs"
+        .to_string();
+    content.log_text = "Slurm has no database entry of the output file for completed jobs."
+        .to_string();
 }
 
 
 fn get_squeue_joblist(command: &str) -> Vec<Job> {
     let format_entries = vec![
-        "JobID:16", "Name:16", "StateCompact:2", "TimeUsed:16", 
+        "JobID:16", "Name:32", "StateCompact:2", "TimeUsed:16", 
         "PendingTime:16", "Partition:16", "NumNodes:8",
         "WorkDir:256", "Command:256", "StdOut:256"];
     let format = format_entries.join("|%|,");
@@ -230,7 +274,9 @@ pub fn format_squeue_output(output: &str) -> Vec<Job> {
         let nodes = parts[6].parse::<u32>().unwrap_or(0);
         let workdir = parts[7].to_string();
         let command = parts[8].to_string();
-        let output = parts[9].to_string();
+        let mut output = parts[9].to_string();
+        output = output.replace("%j", &id);
+        output = output.replace("%x", &name);
         joblist.push(Job::new(&id, &name, status, 
                               &time, &partition, nodes,
                               &workdir, &command, Some(output)));
@@ -322,24 +368,30 @@ pub fn get_job_details(job_id: &str) -> String {
     }
 }
 
-fn _get_log_path(job_details: &str) -> Option<String> {
-    let mut log_path = String::new();
-    for line in job_details.lines() {
-        if line.replace(" ", "").starts_with("StdOut=") {
-            log_path = line.split('=').collect::<Vec<&str>>()[1].to_string();
-            break;
-        }
+fn get_log_tail(log_path: &str) -> String {
+    // check if the path exists
+    if !std::path::Path::new(log_path).exists() {
+        return format!("Logfile does not exist: {}", log_path);
     }
-    if log_path.is_empty() {
-        return None;
-    }
-    Some(log_path)
-}
+    // Option 1: use std::fs::read_to_string
+    // Option 2: use Command::new("tail")
+    // the first option seems to be slow for large files
+    // so use the second option for now
 
-fn _get_log_tail(log_path: &str, lines: usize) -> String {
+    // // read the content of the file at the log file path
+    // match std::fs::read_to_string(log_path) {
+    //     Ok(content) => {
+    //         let lines = content.lines().collect::<Vec<&str>>();
+    //         lines.join("\n")
+    //     },
+    //     Err(e) => {
+    //         e.to_string()
+    //     },
+    // }
+
     let command_stat = Command::new("tail")
         .arg("-n")
-        .arg(lines.to_string())
+        .arg("100") // last 100 lines should be enough
         .arg(log_path)
         .output();
     match command_stat {
@@ -374,24 +426,3 @@ fn format_time_pending(time_str: &str) -> String {
     format!("{}-{:02}:{:02}:{:02}", days, hours, minutes, seconds)
 }
 
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_log_path() {
-        let job_details = "
-JobId=9638603 JobName=dummy_name
-   NodeList=l[50321-50324,50327,50330,50333,50337-50338,50340-50341,50343]
-   BatchHost=l50321
-   Command=./path/to/command.run
-   WorkDir=/work/dir
-   StdErr=/std/LOG.err
-   StdIn=/dev/null
-   StdOut=/std/LOG.out";
-        let log_path = _get_log_path(job_details);
-        assert_eq!(log_path, Some("/std/LOG.out".to_string()));
-    }
-}
