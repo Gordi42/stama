@@ -243,7 +243,7 @@ impl JobOverview {
 
     fn render_title(&self, f: &mut Frame, area: &Rect) {
         f.render_widget(
-            Paragraph::new("JOB OVERVIEW")
+            Paragraph::new("SLURM TASK MANAGER")
                 .style(Style::default().fg(Color::Red))
                 .alignment(Alignment::Center),
             *area,

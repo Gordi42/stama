@@ -66,7 +66,7 @@ impl HelpMenu {
             HelpEntry::new("Down/Up (j/k)", "Next/Previous job"),
             HelpEntry::new("Enter (l)", "Open job actions menu"),
             HelpEntry::new("tab", "Select next sorting category"),
-            HelpEntry::new("r", "reverse sorting order"),
+            HelpEntry::new("r", "Reverse sorting order"),
             HelpEntry::new("1", "Toggle job details"),
             HelpEntry::new("2", "Toggle log"),
             HelpEntry::new("a", "Open allocation menu"),
@@ -99,12 +99,22 @@ impl HelpMenu {
         ];
         let stama_settings = HelpCategory::new(
             "Stama Settings", stama_settings_entries);
+        // info category
+        let version: &str = env!("CARGO_PKG_VERSION");
+        let info_entries = vec![
+            HelpEntry::new("name", "Slurm Task Manager (stama)"),
+            HelpEntry::new("version", version),
+            HelpEntry::new("author", "Silvano Rosenau"),
+        ];
+        let info = HelpCategory::new(
+            "Info", info_entries);
         
         let categories = vec![
             job_overview,
             job_actions,
             allocation_menu,
             stama_settings,
+            info,
         ];
 
         Self {
@@ -183,10 +193,8 @@ impl HelpMenu {
 
         // Render the border
         let block = Block::default()
-            .title(block::Title::from("HELP: Slurm Task Manager (stama)")
+            .title(block::Title::from("HELP:")
                    .alignment(Alignment::Left))
-            .title(block::Title::from("Silvano Rosenau")
-                   .alignment(Alignment::Right).position(block::Position::Bottom))
             .title(block::Title::from("<esc> to close")
                    .alignment(Alignment::Right))
             .borders(Borders::ALL)
