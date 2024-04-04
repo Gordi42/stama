@@ -25,6 +25,7 @@ pub enum WindowFocus {
 #[derive(Default)]
 pub struct MouseAreas {
     pub joblist_title: Rect,
+    pub squeue_command: Rect,
     pub details_title: Rect,
     pub bottom_symbol: Rect,
     pub log_title: Rect,
@@ -321,6 +322,7 @@ impl JobOverview {
         // update the mouse areas
         let mut top_row = area.clone();
         top_row.height = 1;
+        top_row.width = title_len - 2;
         self.mouse_areas.joblist_title = top_row;
         let mut joblist_area = block.inner(*area).clone();
 
@@ -332,6 +334,7 @@ impl JobOverview {
         let mut squeue_rect = top_row.clone();
         squeue_rect.width = buffer.len() as u16 + 1;
         squeue_rect.x = title_len - 1;
+        self.mouse_areas.squeue_command = squeue_rect;
         self.render_squeue_command(f, &squeue_rect);
 
         if self.joblist.is_empty() {
@@ -794,18 +797,26 @@ impl JobOverview {
 
         if !self.handle_input { return; }
         let mouse_pos = mouse_input.get_position();
+        
 
         if let Some(event_kind) = mouse_input.kind() {
-            if self.edit_squeue {
-                self.edit_squeue = false;
-                return;
-            }
 
             match event_kind {
                 MouseEventKind::Down(MouseButton::Left) => {
+                    // if the squeue command is being edited, go back
+                    // to normal mode
+                    if self.edit_squeue {
+                        self.edit_squeue = false;
+                        return;
+                    }
                     // joblist title
                     if self.mouse_areas.joblist_title.contains(mouse_pos) {
                         self.collapsed_top = !self.collapsed_top;
+                        mouse_input.click();
+                    }
+                    // squeue Command
+                    if self.mouse_areas.squeue_command.contains(mouse_pos) {
+                        self.edit_squeue = true;
                         mouse_input.click();
                     }
                     // joblist categories
