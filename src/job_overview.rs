@@ -860,14 +860,12 @@ impl JobOverview {
                     }
                     // details title
                     if self.mouse_areas.details_title.contains(mouse_pos) {
-                        self.focus = WindowFocus::JobDetails;
-                        self.collapsed_bot = false;
+                        self.select_details();
                         mouse_input.click();
                     }
                     // log title
                     if self.mouse_areas.log_title.contains(mouse_pos) {
-                        self.focus = WindowFocus::Log;
-                        self.collapsed_bot = false;
+                        self.select_log();
                         mouse_input.click();
                     }
                 },
