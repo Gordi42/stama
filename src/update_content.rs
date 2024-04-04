@@ -333,6 +333,8 @@ pub fn format_sacct_output(output: &str) -> Vec<Job> {
             JobStatus::Timeout
         } else if status_text.starts_with("CANCELLED") {
             JobStatus::Cancelled
+        } else if status_text.starts_with("FAILED") {
+            JobStatus::Failed
         } else if status_text.starts_with("RUNNING") {
             continue;
         } else if status_text.starts_with("PENDING") {

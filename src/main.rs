@@ -7,7 +7,8 @@ use crate::{
     event::{Event, EventHandler},
     tui::Tui,
     update::update,
-    mouse_input::mouse_input,};
+    mouse_input::mouse_input,
+    write_output::write_output_file,};
 
 pub mod app;
 pub mod event;
@@ -25,6 +26,7 @@ pub mod user_options_menu;
 pub mod help;
 pub mod message;
 pub mod confirmation;
+pub mod write_output;
 
 
 fn main() -> Result<()> {
@@ -76,7 +78,7 @@ fn main() -> Result<()> {
     tui.exit()?;
     match app.exit_command {
         Some(command) => {
-            println!("{}", command);
+            write_output_file(&command);
         }
         None => {}
     }

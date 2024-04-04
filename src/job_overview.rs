@@ -112,27 +112,38 @@ impl JobOverview {
         if self.joblist.is_empty() { return; }
         // get the id of the job in focus
         let id = self.joblist[self.index].id.clone();
-        // sort the job list
+        // sort the job list based on the sort_category
+        // secondary sort is based on the id
         match self.sort_category {
             SortCategory::Id => {
                 self.joblist.sort_by(|a, b| b.id.cmp(&a.id));
             },
             SortCategory::Name => {
-                self.joblist.sort_by(|a, b| a.name.cmp(&b.name));
+                self.joblist.sort_by(|a, b| {
+                    a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id))
+                });
             },
             SortCategory::Status => {
-                self.joblist.sort_by(|a, b| 
-                                     a.status.priority().cmp(
-                                     &b.status.priority()));
+                self.joblist.sort_by(|a, b| {
+                    a.status.priority().cmp(&b.status.priority())
+                        .then_with(|| a.id.cmp(&b.id))
+                });
             },
             SortCategory::Time => {
-                self.joblist.sort_by(|a, b| a.time.cmp(&b.time));
+                self.joblist.sort_by(|a, b| {
+                    a.time.cmp(&b.time).then_with(|| a.id.cmp(&b.id))
+                });
             },
             SortCategory::Partition => {
-                self.joblist.sort_by(|a, b| a.partition.cmp(&b.partition));
+                self.joblist.sort_by(|a, b| {
+                    a.partition.cmp(&b.partition)
+                        .then_with(|| a.id.cmp(&b.id))
+                });
             },
             SortCategory::Nodes => {
-                self.joblist.sort_by(|a, b| b.nodes.cmp(&a.nodes));
+                self.joblist.sort_by(|a, b| {
+                    a.nodes.cmp(&b.nodes).then_with(|| a.id.cmp(&b.id))
+                });
             },
         }
         // reverse the list if needed
