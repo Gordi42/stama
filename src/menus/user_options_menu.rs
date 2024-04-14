@@ -7,6 +7,7 @@ use ratatui::{
 use crossterm::event::{
     KeyCode, KeyEvent, MouseButton, MouseEventKind};
 
+use crate::menus::OpenMenu;
 use crate::text_field::{TextField, TextFieldType};
 use crate::app::Action;
 use crate::mouse_input::MouseInput;
@@ -244,7 +245,7 @@ impl UserOptionsMenu {
                 *action = Action::UpdateUserOptions;
             },
             KeyCode::Char('?') => {
-                *action = Action::OpenHelpMenu(3);
+                *action = Action::OpenMenu(OpenMenu::Help(3));
             },
             
             _ => {}

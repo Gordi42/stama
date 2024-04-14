@@ -18,15 +18,11 @@ pub mod update;
 pub mod update_content;
 pub mod mouse_input;
 pub mod job;
-pub mod job_overview;
-pub mod job_actions;
 pub mod text_field;
 pub mod user_options;
-pub mod user_options_menu;
-pub mod help;
-pub mod message;
-pub mod confirmation;
+pub mod menus;
 pub mod write_output;
+pub mod joblist;
 
 
 fn main() -> Result<()> {
@@ -49,7 +45,7 @@ fn main() -> Result<()> {
         tui.draw(&mut app)?;
         // Handle events.
         match tui.events.next()? {
-            Event::Tick => {app.tick();}
+            Event::Tick => {app.update_jobs();}
             Event::Key(key_event) => update(&mut app, key_event),
             Event::Mouse(mouse_event) => mouse_input(&mut app, mouse_event),
             Event::Resize(_, _) => {}

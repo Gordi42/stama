@@ -7,13 +7,12 @@ use ratatui::{
 use crossterm::event::{
     KeyCode, KeyEvent, MouseEventKind, MouseButton,};
 use tui_textarea::{TextArea, CursorMove};
-use std::process::Command;
 
+use crate::menus::OpenMenu;
 use crate::app::Action;
 use crate::job::{Job, JobStatus};
 use crate::mouse_input::MouseInput;
-use crate::user_options::UserOptions;
-use crate::update_content::{ContentUpdater};
+use crate::joblist::{JobList, JobListAction, SortCategory};
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,35 +32,18 @@ pub struct MouseAreas {
     pub categories: Vec<Rect>,
 }
 
-#[derive(PartialEq)]
-pub enum SortCategory {
-    Id,
-    Name,
-    Status,
-    Time,
-    Partition,
-    Nodes,
-}
-
 pub struct JobOverview {
     pub should_render: bool,  // if the window should render
     pub handle_input: bool,   // if the window should handle input
-    pub sort_category: SortCategory, // the category to sort 
-    pub reversed: bool,       // if the sorting is reversed
     pub collapsed_top: bool,  // if the job list is collapsed
     pub collapsed_bot: bool,  // if the job details are collapsed
     pub focus: WindowFocus,   // which part of the window is in focus
-    pub joblist: Vec<Job>,    // the list of jobs
-    pub index: usize,         // the index of the job in focus
     pub state: TableState,     // the state of the job list
     pub mouse_areas: MouseAreas, // the mouse areas of the window
     pub squeue_command: TextArea<'static>, // the squeue command
     pub edit_squeue: bool,    // if the squeue command is being edited
-    pub refresh_rate: usize,    // the refresh rate of the window
-    pub job_details: String,  // the job details
+    pub refresh_rate: usize,  // the refresh rate of the window
     pub log_height: u16,      // the height of the log section
-    pub log: String,          // the log of the job
-    pub content_updater: ContentUpdater, // the content update
 }
 
 // ====================================================================
@@ -69,7 +51,7 @@ pub struct JobOverview {
 // ====================================================================
 
 impl JobOverview {
-    pub fn new(refresh_rate: usize) -> Self {
+    pub fn new(refresh_rate: usize, squeue_command: &str,) -> Self {
         let mut state = TableState::default();
         state.select(Some(0));
         // create mouse areas with 6 categories
@@ -77,28 +59,21 @@ impl JobOverview {
         for _ in 0..6 {
             mouse_areas.categories.push(Rect::default());
         }
-        let command = format!("squeue -u {}", whoami());
+        let command = squeue_command.to_string();
         let mut textarea = TextArea::from([command]);
         textarea.move_cursor(CursorMove::End);
         Self {
             should_render: true,
             handle_input: true,
-            sort_category: SortCategory::Id,
-            reversed: false,
             collapsed_top: false,
             collapsed_bot: true,
             focus: WindowFocus::JobDetails,
-            joblist: vec![],
-            index: 0,
             state: state,
             mouse_areas: mouse_areas,
             squeue_command: textarea,
             edit_squeue: false,
             refresh_rate: refresh_rate,
-            job_details: String::new(),
             log_height: 0,
-            log: String::new(),
-            content_updater: ContentUpdater::new(),
         }
     }
 }
@@ -108,101 +83,17 @@ impl JobOverview {
 // ====================================================================
 
 impl JobOverview {
-    pub fn sort(&mut self) {
-        // only sort if there are jobs
-        if self.joblist.is_empty() { return; }
-        // get the id of the job in focus
-        let id = self.joblist[self.index].id.clone();
-        // sort the job list based on the sort_category
-        // secondary sort is based on the id
-        match self.sort_category {
-            SortCategory::Id => {
-                self.joblist.sort_by(|a, b| b.id.cmp(&a.id));
-            },
-            SortCategory::Name => {
-                self.joblist.sort_by(|a, b| {
-                    a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id))
-                });
-            },
-            SortCategory::Status => {
-                self.joblist.sort_by(|a, b| {
-                    a.status.priority().cmp(&b.status.priority())
-                        .then_with(|| a.id.cmp(&b.id))
-                });
-            },
-            SortCategory::Time => {
-                self.joblist.sort_by(|a, b| {
-                    a.time.cmp(&b.time).then_with(|| a.id.cmp(&b.id))
-                });
-            },
-            SortCategory::Partition => {
-                self.joblist.sort_by(|a, b| {
-                    a.partition.cmp(&b.partition)
-                        .then_with(|| a.id.cmp(&b.id))
-                });
-            },
-            SortCategory::Nodes => {
-                self.joblist.sort_by(|a, b| {
-                    a.nodes.cmp(&b.nodes).then_with(|| a.id.cmp(&b.id))
-                });
-            },
-        }
-        // reverse the list if needed
-        if self.reversed {
-            self.joblist.reverse();
-        }
-        // get the index of the job in focus
-        let index = self.joblist.iter().position(|job| job.id == id);
-        self.set_index_raw(index.unwrap_or(0) as i32);
-    }
-
-    pub fn get_job(&self) -> Option<&Job> {
-        self.joblist.get(self.index)
-    }
-
-    pub fn get_squeue_command(&self) -> String {
+    fn get_squeue_command(&self) -> String {
         self.squeue_command.lines().join("\n")
     }
 
-    pub fn update_joblist(&mut self, user_options: &UserOptions) {
-        let id = match self.joblist.is_empty() {
-            true => "no_job".to_string(),
-            false => self.joblist[self.index].id.clone(),
-        };
-        let job = self.get_job().cloned();
-        let command = self.get_squeue_command();
-        match self.content_updater.tick(
-            job, command, user_options.clone()) {
-            Some(content) => {
-                self.joblist = content.job_list;
-                self.job_details = content.details_text;
-                self.log = content.log_text;
-            }
-            None => { }
-        }
-        // check if there is a job with the same id
-        let index = self.joblist.iter().position(|job| job.id == id);
-        self.set_index_raw(index.unwrap_or(0) as i32);
-        self.sort();
-    }
-
-        
-}
-
-fn whoami() -> String {
-    let command = Command::new("whoami")
-        .output();
-    match command {
-        Ok(output) => {
-            let output = String::from_utf8_lossy(&output.stdout);
-            output.to_string()
-        },
-        Err(_) => {
-            "Error executing whoami".to_string()
-        },
+    fn exit_squeue_edit(&mut self, action: &mut Action) {
+        let new_command = self.get_squeue_command();
+        *action = Action::UpdateJobList(
+            JobListAction::UpdateSqueueCommand(new_command));
+        self.edit_squeue = false;
     }
 }
-
 
 
 // ====================================================================
@@ -210,7 +101,7 @@ fn whoami() -> String {
 // ====================================================================
 
 impl JobOverview {
-    pub fn render(&mut self, f: &mut Frame, area: &Rect) {
+    pub fn render(&mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
         // only render if the window is active
         if !self.should_render { return; }
 
@@ -237,8 +128,8 @@ impl JobOverview {
 
         // render the title, job list, and job details
         self.render_title(f, &layout[0]);
-        self.render_joblist(f, &layout[1]);
-        self.render_bottom_section(f, &layout[2]);
+        self.render_joblist(f, &layout[1], jobs);
+        self.render_bottom_section(f, &layout[2], jobs);
     }
 
     fn render_title(&self, f: &mut Frame, area: &Rect) {
@@ -254,25 +145,30 @@ impl JobOverview {
     // RENDERING THE JOB LIST
     // ----------------------------------------------------------------------
 
-    fn render_joblist(&mut self, f: &mut Frame, area: &Rect) {
+    fn render_joblist(&mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
+        // set the state of the table
+        self.state.select(Some(jobs.get_index()));
         match self.collapsed_top {
-            true => self.render_joblist_collapsed(f, area),
-            false => self.render_joblist_extended(f, area),
+            true => self.render_joblist_collapsed(f, area, jobs),
+            false => self.render_joblist_extended(f, area, jobs),
         }
     }
 
-    fn render_joblist_collapsed(&mut self, f: &mut Frame, area: &Rect) {
+    fn render_joblist_collapsed(
+        &mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
         // update the mouse areas
         self.mouse_areas.joblist_title = area.clone();
         self.mouse_areas.joblist = Rect::default();
 
-        if self.joblist.is_empty() {
-            let title = format!("▶ Job list (collapsed)");
-            f.render_widget(Line::from(title), *area);
-            return;
-        }
+        let job = match jobs.get_job() {
+            Some(job) => job,
+            None => {
+                let title = format!("▶ Job list (collapsed)");
+                f.render_widget(Line::from(title), *area);
+                return;
+            },
+        };
 
-        let job = &self.joblist[self.index];
         let col = get_job_color(job);
 
         let content_strings = vec![
@@ -306,7 +202,8 @@ impl JobOverview {
         });
     }
 
-    fn render_joblist_extended(&mut self, f: &mut Frame, area: &Rect) {
+    fn render_joblist_extended(
+        &mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
         let title = "▼ Job list: ";
         let title_len = title.len() as u16;
 
@@ -337,7 +234,7 @@ impl JobOverview {
         self.mouse_areas.squeue_command = squeue_rect;
         self.render_squeue_command(f, &squeue_rect);
 
-        if self.joblist.is_empty() {
+        if jobs.len() == 0 {
             self.render_empty_joblist(f, &joblist_area);
             return;
         }
@@ -354,7 +251,7 @@ impl JobOverview {
                                    Span::raw("Partition"), 
                                    Span::raw("Nodes")];
         // modify the title names if the category is selected
-        let cat_ind = match self.sort_category {
+        let cat_ind = match jobs.get_sort_category() {
             SortCategory::Id => 0,
             SortCategory::Name => 1,
             SortCategory::Status => 2,
@@ -365,12 +262,12 @@ impl JobOverview {
         let title_string: String = title_names[cat_ind].content.clone().into();
         let new_title = format!("{} {}", 
                            title_string,
-                           if self.reversed { "▲" } else { "▼" });
+                           if jobs.is_reverse() { "▲" } else { "▼" });
         title_names[cat_ind] = Span::styled(
             new_title, Style::default().fg(Color::Blue));
 
         // Create the rows for the job list
-        let rows = self.joblist.iter().map(|job| {
+        let rows = jobs.jobs.iter().map(|job| {
             Row::new(vec![
                 job.id.clone(),
                 job.name.clone(),
@@ -456,11 +353,12 @@ impl JobOverview {
     // ----------------------------------------------------------------------
     // RENDERING THE JOB DETAILS AND LOG SECTION
     // ----------------------------------------------------------------------
-    fn render_bottom_section(&mut self, f: &mut Frame, area: &Rect) {
+    fn render_bottom_section(&mut self, f: &mut Frame, 
+                             area: &Rect, jobs: &JobList) {
         self.log_height = area.height.saturating_sub(2);
         match self.collapsed_bot {
             true => self.render_bottom_collapsed(f, area),
-            false => self.render_bottom_extended(f, area),
+            false => self.render_bottom_extended(f, area, jobs),
         }
     }
 
@@ -480,7 +378,8 @@ impl JobOverview {
         f.render_widget(line, *area);
     }
 
-    fn render_bottom_extended(&mut self, f: &mut Frame, area: &Rect) {
+    fn render_bottom_extended(
+        &mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
         let mut title = vec!{
             Span::raw("▼ "),
             Span::raw("1. Job details"), 
@@ -511,25 +410,25 @@ impl JobOverview {
         let rect = block.inner(*area);
         match self.focus {
             WindowFocus::JobDetails => {
-                self.render_job_details(f, &rect);
+                self.render_job_details(f, &rect, jobs);
             },
             WindowFocus::Log => {
-                self.render_log(f, &rect);
+                self.render_log(f, &rect, jobs);
             },
         }
     }
 
-    fn render_job_details(&self, f: &mut Frame, area: &Rect) {
+    fn render_job_details(&self, f: &mut Frame, area: &Rect, jobs: &JobList) {
 
-        let paragraph = Paragraph::new(self.job_details.clone())
+        let paragraph = Paragraph::new(jobs.get_job_details())
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true });
 
         f.render_widget(paragraph, *area);
     }
 
-    fn render_log(&self, f: &mut Frame, area: &Rect) {
-        let mut paragraph = Paragraph::new(self.log.clone())
+    fn render_log(&self, f: &mut Frame, area: &Rect, jobs: &JobList) {
+        let mut paragraph = Paragraph::new(jobs.get_log_tail())
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true });
 
@@ -612,7 +511,7 @@ impl JobOverview {
         if self.edit_squeue {
             match key_event.code {
                 KeyCode::Esc | KeyCode::Enter => {
-                    self.edit_squeue = false;
+                    self.exit_squeue_edit(action);
                     return true;
                 },
                 _ => {
@@ -629,23 +528,21 @@ impl JobOverview {
             },
             // Next / Previous job
             KeyCode::Down | KeyCode::Char('j') => {
-                self.next_job();
+                self.next_job(action);
             },
             KeyCode::Up | KeyCode::Char('k') => {
-                self.prev_job();
+                self.prev_job(action);
             },
             // Open job action menu
             KeyCode::Enter | KeyCode::Char('l') => {
-                *action = Action::OpenJobAction;
+                *action = Action::OpenMenu(OpenMenu::JobActions);
             },
             // Change sorting category
             KeyCode::Tab => {
-                self.next_sort_category();
-                *action = Action::SortJobList;
+                *action = Action::UpdateJobList(JobListAction::NextSortCategory);
             },
             KeyCode::Char('r') => {
-                self.reversed = !self.reversed;
-                *action = Action::SortJobList;
+                *action = Action::UpdateJobList(JobListAction::ReverseSortDirection);
             },
             // Switching focus between job details and log
             KeyCode::Char('1') => {
@@ -662,13 +559,13 @@ impl JobOverview {
             },
             // Open job allocation menu
             KeyCode::Char('a') => {
-                *action = Action::OpenJobAllocation;
+                *action = Action::OpenMenu(OpenMenu::JobAllocation);
             },
             KeyCode::Char('o') => {
-                *action = Action::OpenUserOptions;
+                *action = Action::OpenMenu(OpenMenu::UserOptions);
             },
             KeyCode::Char('?') => {
-                *action = Action::OpenHelpMenu(0);
+                *action = Action::OpenMenu(OpenMenu::Help(0));
             },
             // Collapsing/Extending the joblist
             KeyCode::Char('m') => {
@@ -729,62 +626,22 @@ impl JobOverview {
         }
     }
 
-    fn next_job(&mut self) {
-        self.set_index(self.index as i32 + 1);
+    fn next_job(&mut self, action: &mut Action) {
+        *action = Action::UpdateJobList(JobListAction::Next);
     }
 
-    fn prev_job(&mut self) {
-        self.set_index(self.index as i32 - 1);
+    fn prev_job(&mut self, action: &mut Action) {
+        *action = Action::UpdateJobList(JobListAction::Previous);
     }
 
     pub fn set_index_raw(&mut self, index: i32) {
-        let job_len = self.joblist.len() as i32;
-        let mut new_index = index;
-        if index >= job_len {
-            new_index = 0;
-        } else if index < 0 {
-            new_index = job_len - 1;
-        } 
-        self.index = new_index as usize;
-        self.state.select(Some(self.index));
+        self.state.select(Some(index as usize));
     }
 
     pub fn set_index(&mut self, index: i32) {
-        let job_len = self.joblist.len() as i32;
-        let mut new_index = index;
-        if index >= job_len {
-            new_index = 0;
-        } else if index < 0 {
-            new_index = job_len - 1;
-        } 
-        self.index = new_index as usize;
-        self.state.select(Some(self.index));
-        self.job_details = "loading...".to_string();
-        self.log = "loading...".to_string();
+        self.state.select(Some(index as usize));
     }
 
-    fn next_sort_category(&mut self) {
-        match self.sort_category {
-            SortCategory::Id => {
-                self.sort_category = SortCategory::Name;
-            },
-            SortCategory::Name => {
-                self.sort_category = SortCategory::Status;
-            },
-            SortCategory::Status => {
-                self.sort_category = SortCategory::Time;
-            },
-            SortCategory::Time => {
-                self.sort_category = SortCategory::Partition;
-            },
-            SortCategory::Partition => {
-                self.sort_category = SortCategory::Nodes;
-            },
-            SortCategory::Nodes => {
-                self.sort_category = SortCategory::Id;
-            },
-        }
-    }
 }
 
 // ====================================================================
@@ -806,7 +663,7 @@ impl JobOverview {
                     // if the squeue command is being edited, go back
                     // to normal mode
                     if self.edit_squeue {
-                        self.edit_squeue = false;
+                        self.exit_squeue_edit(action);
                         return;
                     }
                     // joblist title
@@ -832,24 +689,19 @@ impl JobOverview {
                                 5 => SortCategory::Nodes,
                                 _ => SortCategory::Id,
                             };
-                            // reverse sorting if same category is selected
-                            if new_cat == self.sort_category {
-                                self.reversed = !self.reversed;
-                            } else {
-                                self.sort_category = new_cat;
-                            };
-                            *action = Action::SortJobList;
+                            *action = Action::UpdateJobList(
+                                JobListAction::SelectSortCategory(new_cat));
                             mouse_input.click();
                         }
                     }
                     // joblist entries
                     if self.mouse_areas.joblist.contains(mouse_pos) {
                         let rel_y = mouse_pos.y - self.mouse_areas.joblist.y;
-                        let mut new_index = rel_y as i32 + self.state.offset() as i32;
-                        new_index = new_index.min(self.joblist.len() as i32 - 1);
-                        self.set_index(new_index);
+                        let new_index = rel_y as usize + self.state.offset();
+                        *action = Action::UpdateJobList(
+                            JobListAction::Select(new_index));
                         if mouse_input.is_double_click() {
-                            *action = Action::OpenJobAction;
+                            *action = Action::OpenMenu(OpenMenu::JobActions);
                         }
                         mouse_input.click();
                     }
@@ -870,10 +722,10 @@ impl JobOverview {
                     }
                 },
                 MouseEventKind::ScrollDown => {
-                    self.next_job();
+                    self.next_job(action);
                 },
                 MouseEventKind::ScrollUp => {
-                    self.prev_job();
+                    self.prev_job(action);
                 },
                 _ => {},
             }

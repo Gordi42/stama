@@ -27,7 +27,7 @@ pub fn render(app: &mut App, f: &mut Frame) {
     );
 
     // render the windows
-    app.job_overview.render(f, &outer_layout[0]);
+    app.job_overview.render(f, &outer_layout[0], &app.joblist);
     app.job_actions_menu.render(f, &outer_layout[0]);
     app.user_options_menu.render(f, &outer_layout[0]);
     app.help_menu.render(f, &outer_layout[0]);

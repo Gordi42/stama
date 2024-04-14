@@ -7,6 +7,7 @@ use ratatui::{
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use crate::mouse_input::MouseInput;
 
+use crate::menus::OpenMenu;
 use crate::app::Action;
 use crate::job::Job;
 
@@ -172,7 +173,7 @@ impl JobActionsMenu {
 impl JobActionsMenu {
     /// Handle user input for the job actions menu
     /// Always returns true (input is always handled)
-    pub fn input(&mut self, _action: &mut Action, key_event: KeyEvent) -> bool {
+    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
         if !self.handle_input { return false; }
 
         match key_event.code {
@@ -186,30 +187,30 @@ impl JobActionsMenu {
                 self.previous();
             },
             KeyCode::Enter | KeyCode::Char('l') => {
-                self.perform_action(_action);
+                self.perform_action(action);
             },
             KeyCode::Char('?') => {
-                *_action = Action::OpenHelpMenu(1);
+                *action = Action::OpenMenu(OpenMenu::Help(1));
             },
             KeyCode::Char('1') => {
                 self.set_index(0);
-                self.perform_action(_action);
+                self.perform_action(action);
             },
             KeyCode::Char('2') => {
                 self.set_index(1);
-                self.perform_action(_action);
+                self.perform_action(action);
             },
             KeyCode::Char('3') => {
                 self.set_index(2);
-                self.perform_action(_action);
+                self.perform_action(action);
             },
             KeyCode::Char('4') => {
                 self.set_index(3);
-                self.perform_action(_action);
+                self.perform_action(action);
             },
             KeyCode::Char('5') => {
                 self.set_index(4);
-                self.perform_action(_action);
+                self.perform_action(action);
             },
             
             _ => {}
