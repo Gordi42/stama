@@ -12,6 +12,8 @@ use crate::menus::{
     message::Message, 
     user_options_menu::UserOptionsMenu};
 
+use self::job_allocation::JobAllocationMenu;
+
 pub mod job_overview;
 pub mod user_options_menu;
 pub mod help;
@@ -38,6 +40,8 @@ pub struct MenuContainer {
     /// A menu that shows the available action for the
     /// selected job
     pub job_actions_menu: JobActionsMenu,
+    /// A menu for allocating jobs (salloc)
+    pub job_allocation_menu: JobAllocationMenu,
     /// A menu that shows the configurable user options
     pub user_options_menu: UserOptionsMenu,
     /// A popup window that shows help for keybindings
@@ -59,6 +63,7 @@ impl MenuContainer {
             job_overview: JobOverview::new(
                 user_options.refresh_rate, &joblist.squeue_command),
             job_actions_menu: JobActionsMenu::new(),
+            job_allocation_menu: JobAllocationMenu::new(),
             help_menu: HelpMenu::new(),
             message: Message::new_disabled(),
             confirmation: Confirmation::new_disabled(),
@@ -119,7 +124,7 @@ impl MenuContainer {
 
     /// Opens the job allocation menu (not implemented)
     fn open_job_allocation(&mut self) {
-        self.message = Message::new("Opening job allocation not implemented");
+        self.job_allocation_menu.activate();
     }
 
     /// Opens the help menu with a focus on the selected category
@@ -145,6 +150,7 @@ impl MenuContainer {
         // so that the frontmost menu is rendered last
         self.job_overview.render(f, area, joblist);
         self.job_actions_menu.render(f, area);
+        self.job_allocation_menu.render(f, area);
         self.user_options_menu.render(f, area);
         self.help_menu.render(f, area);
         self.message.render(f, area);
@@ -177,6 +183,9 @@ impl MenuContainer {
             input_handled = self.user_options_menu.input(action, key_event);
         }
         if !input_handled {
+            input_handled = self.job_allocation_menu.input(action, key_event);
+        }
+        if !input_handled {
             input_handled = self.job_actions_menu.input(action, key_event);
         }
         if !input_handled {
@@ -199,6 +208,7 @@ impl MenuContainer {
         self.confirmation.mouse_input(action, mouse_input);
         self.help_menu.mouse_input(action, mouse_input);
         self.user_options_menu.mouse_input(action, mouse_input);
+        self.job_allocation_menu.mouse_input(action, mouse_input);
         self.job_actions_menu.mouse_input(action, mouse_input);
         self.job_overview.mouse_input(action, mouse_input);
     }
