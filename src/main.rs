@@ -1,6 +1,5 @@
 use color_eyre::eyre::Result;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use std::process::{Command, Stdio};
 
 use crate::{
     app::App,
@@ -26,9 +25,8 @@ pub mod joblist;
 
 
 fn main() -> Result<()> {
-    // Create an application with 10 jobs.
     let mut app = App::new();
-    app.job_overview.set_index(0);
+    app.menus.job_overview.set_index(0);
  
 
     // Initialize the terminal user interface.
@@ -55,18 +53,9 @@ fn main() -> Result<()> {
             app.should_set_frame_rate = false;
         };
         if app.open_vim {
-            let editor = app.user_options.external_editor.as_str();
-            match app.vim_path {
-                Some(path) => {
-                    tui.exit()?;
-                    open_editor(&editor, &path);
-                    app.open_vim = false;
-                    app.vim_path = None;
-                    tui.enter()?;
-                }
-                None => {
-                }
-            }
+            tui.exit()?;
+            app.open_file_in_editor();
+            tui.enter()?;
         }
 
     }
@@ -80,22 +69,4 @@ fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-
-fn open_editor(editor: &str, path: &str) {
-    let mut parts = editor.trim().split_whitespace();
-    let program = parts.next().unwrap_or(" ");
-    let args: Vec<&str> = parts.collect();
-
-    let mut child = Command::new(program)
-        .args(args)
-        .arg(path)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn().expect("Failed to execute command");
-
-    // Wait for the process to finish
-    child.wait().expect("Failed to wait on child");
 }

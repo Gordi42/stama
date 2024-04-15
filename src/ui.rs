@@ -1,10 +1,11 @@
 use ratatui::{
-    prelude::{Alignment, Frame, Layout, Direction, Constraint},
+    prelude::{Alignment, Constraint, Direction, Frame, Layout},
     style::{Color, Style},
-    widgets::{Paragraph},
+    widgets::Paragraph,
 };
 use crate::app::App;
 
+/// Render the UI
 pub fn render(app: &mut App, f: &mut Frame) {
 
     let outer_layout = Layout::default()
@@ -27,12 +28,7 @@ pub fn render(app: &mut App, f: &mut Frame) {
     );
 
     // render the windows
-    app.job_overview.render(f, &outer_layout[0], &app.joblist);
-    app.job_actions_menu.render(f, &outer_layout[0]);
-    app.user_options_menu.render(f, &outer_layout[0]);
-    app.help_menu.render(f, &outer_layout[0]);
-    app.confirmation.render(f, &outer_layout[0]);
-    app.message.render(f, &outer_layout[0]);
+    app.menus.render(f, &outer_layout[0], &app.joblist);
 
 }
 

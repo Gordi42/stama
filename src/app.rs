@@ -1,14 +1,11 @@
-use std::process::{Command};
+use std::process::{Command, Stdio};
 
-use crate::{
-    mouse_input::MouseInput,};
+use crate::menus::MenuContainer;
+use crate::mouse_input::MouseInput;
 use crate::user_options::UserOptions;
 use crate::menus::{
     OpenMenu,
-    job_overview::JobOverview,
-    user_options_menu::UserOptionsMenu,
-    help::HelpMenu,
-    job_actions::{JobActionsMenu, JobActions},
+    job_actions::JobActions,
     message::{Message, MessageKind},
     confirmation::Confirmation,};
 use crate::job::{Job, JobStatus};
@@ -21,32 +18,39 @@ use crate::joblist::{JobList, JobListAction};
 pub enum Action {
     #[default]
     None,
-    // Opens a confirmation dialog to quit the application
+    /// Opens a confirmation dialog to quit the application
     Quit,
-    // This action always quits the application
+    /// This action always quits the application
     ConfirmedQuit,
-    // Opens a selected menu
+    /// Opens a selected menu
     OpenMenu(OpenMenu),
-    // Updates the user options from the user options menu
+    /// Updates the user options from the user options menu
     UpdateUserOptions,
-    // Updates the joblist (e.g. job selection, job sorting, etc.)
+    /// Updates the joblist (e.g. job selection, job sorting, etc.)
     UpdateJobList(JobListAction),
-    // Handles a job action (e.g. kill, open log)
+    /// Handles a job action (e.g. kill, open log)
     JobOption(JobActions)
 }
 
-/// The main application struct that holds all the state of the application.
+
+
+/// The main application struct that holds all information and 
+/// states of the application.
 pub struct App {
-    // The current action that should be taken
+    /// The current action that should be taken
     pub action: Action,
     // booleans of actions that are handled in the main loop
+    /// If true, the application should quit
     pub should_quit: bool,
+    /// If true, the application should reset the frame rate
     pub should_set_frame_rate: bool,
+    /// If true, the application should redraw the tui
     pub should_redraw: bool,
-    // To open vim, tui must be closed. Hence they must be handled in 
-    // the main loop
+    /// To open vim, tui must be closed. Hence they must be handled in 
+    /// the main loop
     pub open_vim: bool,
-    pub vim_path: Option<String>,
+    /// The path to the file that should be opened in vim
+    vim_path: Option<String>,
     // This command will be written to a given file (for execution after 
     // closing stama)
     pub exit_command: Option<String>,
@@ -55,12 +59,7 @@ pub struct App {
     // The joblist is the main data structure that holds all the jobs
     pub joblist: JobList,
     // All the menus and dialogs
-    pub job_overview: JobOverview,
-    pub job_actions_menu: JobActionsMenu,
-    pub user_options_menu: UserOptionsMenu,
-    pub help_menu: HelpMenu,
-    pub message: Message,
-    pub confirmation: Confirmation,
+    pub menus: MenuContainer,
     // Mouse input
     pub mouse_input: MouseInput,
 }
@@ -77,9 +76,7 @@ impl App {
         let mut joblist = JobList::new();
         // start the main joblist thread to update the jobs
         joblist.update_jobs(&user_options); 
-        // create the job overview menu
-        let job_overview = JobOverview::new(
-            user_options.refresh_rate, &joblist.squeue_command);
+        let menus = MenuContainer::new(&user_options, &joblist);
         // create the app
         Self {
             action: Action::None,
@@ -91,12 +88,7 @@ impl App {
             exit_command: None,
             user_options: user_options,
             joblist: joblist,
-            job_overview: job_overview,
-            job_actions_menu: JobActionsMenu::new(),
-            help_menu: HelpMenu::new(),
-            message: Message::new_disabled(),
-            confirmation: Confirmation::new_disabled(),
-            user_options_menu: UserOptionsMenu::load(),
+            menus: menus,
             mouse_input: MouseInput::new(),
         }
     }
@@ -122,7 +114,7 @@ impl App {
                 self.confirmed_quit();
             }
             Action::OpenMenu(menu) => {
-                self.open_menu(menu.clone());
+                self.menus.activate_menu(menu.clone(), &self.joblist);
             }
             Action::UpdateUserOptions => {
                 self.update_user_options();
@@ -144,7 +136,7 @@ impl App {
     /// to not confirm
     pub fn quit(&mut self) {
         if self.user_options.confirm_before_quit {
-            self.confirmation = Confirmation::new(
+            self.menus.confirmation = Confirmation::new(
                 "Quit?", Action::ConfirmedQuit);
         } else {
             self.should_quit = true;
@@ -156,42 +148,17 @@ impl App {
         self.should_quit = true;
     }
 
-    /// Opens a selected menu
-    /// The opening functions are implemented in 
-    /// the "OPEN MENU FUNCTIONS" section
-    fn open_menu(&mut self, menu: OpenMenu) {
-        match menu {
-            OpenMenu::JobOverview => {
-                self.open_job_overview();
-            }
-            OpenMenu::JobActions => {
-                self.open_job_action();
-            }
-            OpenMenu::JobAllocation => {
-                self.open_job_allocation();
-            }
-            OpenMenu::UserOptions => {
-                self.user_options_menu.activate();
-            }
-            OpenMenu::Message(message) => {
-                self.open_message(message.clone());
-            }
-            OpenMenu::Help(selected_category) => {
-                self.open_help_menu(selected_category);
-            }
-            _ => {}
-        }
-    }
 
     /// Updates the user options from the user options menu
     fn update_user_options(&mut self) {
         // save the old refresh rate to check if it has changed
         let old_rate = self.user_options.refresh_rate;
         // update the user options
-        self.user_options = self.user_options_menu.to_user_option();
+        self.user_options = self.menus.user_options_menu.to_user_option();
+        let new_rate = self.user_options.refresh_rate;
         // update the job overview refresh rate if it has changed
-        if old_rate != self.user_options.refresh_rate {
-            self.job_overview.refresh_rate = self.user_options.refresh_rate;
+        if old_rate != new_rate {
+            self.menus.job_overview.refresh_rate = new_rate;
             self.should_set_frame_rate = true;
         }
     }
@@ -213,50 +180,15 @@ impl App {
         }
     }
 
+    /// Open an error message
+    fn open_error_message(&mut self, msg: &str) {
+        self.menus.message = Message::new(msg);
+        self.menus.message.kind = MessageKind::Error;
+    }
+
 
 }
 
-// ===================================================================
-// OPEN MENU FUNCTIONS
-// ===================================================================
-
-impl App {
-
-    /// Opens the job overview menu
-    /// This is the main menu that shows all the jobs
-    fn open_job_overview(&mut self) {
-        self.message = Message::new("Opening job overview not implemented");
-    }
-
-    /// Opens the job actions menu
-    /// This menu shows all the possible actions for the selected job
-    fn open_job_action(&mut self) {
-        match self.joblist.get_job() {
-            Some(job) => {
-                self.job_actions_menu.activate(&job);
-            }
-            None => {
-                self.message = Message::new("No job selected");
-                self.message.kind = MessageKind::Error;
-            }
-        }
-    }
-
-    /// Opens the job allocation menu (not implemented)
-    fn open_job_allocation(&mut self) {
-        self.message = Message::new("Opening job allocation not implemented");
-    }
-
-    /// Opens the help menu with a focus on the selected category
-    fn open_help_menu(&mut self, selected_category: usize) {
-        self.help_menu.open(selected_category);
-    }
-
-    /// Opens a message dialog with the given message
-    fn open_message(&mut self, message: Message) {
-        self.message = message;
-    }
-}
 
 // ===================================================================
 // JOB ACTIONS FUNCTIONS
@@ -268,7 +200,7 @@ impl App {
         if self.user_options.confirm_before_kill {
             let job_name = job.get_jobname();
             let msg = format!("Kill job {} ({})?", job_name, job.id);
-            self.confirmation = Confirmation::new(
+            self.menus.confirmation = Confirmation::new(
                 &msg, Action::JobOption(
                     JobActions::KillConfirmed(job.clone())));
         } else {
@@ -292,16 +224,14 @@ impl App {
                 // If it was not successful, show an error message.
                 if !output.status.success() {
                     let error_msg = String::from_utf8_lossy(&output.stderr);
-                    self.message = Message::new(
+                    self.open_error_message(
                         &format!("Error killing job: {}", error_msg));
-                    self.message.kind = MessageKind::Error;
                 }
             }
             Err(e) => {
                 // If the command could not be executed, show an error message.
-                self.message = Message::new(
+                self.open_error_message(
                     &format!("Error killing job: {}", e));
-                self.message.kind = MessageKind::Error;
             }
         }
     }
@@ -315,8 +245,7 @@ impl App {
             Some(job) => job,
             None => {
                 // if no job is selected, show an error message
-                self.message = Message::new("No job selected");
-                self.message.kind = MessageKind::Error;
+                self.open_error_message("No job selected");
                 return;
             }
         };
@@ -324,8 +253,7 @@ impl App {
         let log_path = if let Some(log_path) = &job.output {
             log_path
         } else {
-            self.message = Message::new("No log file found");
-            self.message.kind = MessageKind::Error;
+            self.open_error_message("No log file found");
             return;
         };
         // set the vim path and set the open_vim flag to true
@@ -339,22 +267,19 @@ impl App {
         let job = match self.joblist.get_job() {
             Some(job) => job,
             None => {
-                self.message = Message::new("No job selected");
-                self.message.kind = MessageKind::Error;
+                self.open_error_message("No job selected");
                 return;
             }
         };
         // if the sumbission command is "(null)", show an error message
         if job.command == "(null)" {
-            self.message = Message::new("No submission script found");
-            self.message.kind = MessageKind::Error;
+            self.open_error_message("No submission script found");
             return;
         }
         // if the job command is empty (only whitespace), 
         // show an error message
         if job.command.trim().is_empty() {
-            self.message = Message::new("No submission script found");
-            self.message.kind = MessageKind::Error;
+            self.open_error_message("No submission script found");
             return;
         }
         // For completed jobs, the command is for example:
@@ -364,13 +289,43 @@ impl App {
         // So I just show the command.
         if job.is_completed() {
             let mes = format!("Job was submitted with: \n {}", &job.command);
-            self.message = Message::new(&mes);
+            self.menus.message = Message::new(&mes);
             return;
         }
         // Finally, if all checks are passed, open the submission script
         // by setting the vim path and the open_vim flag to true.
         self.vim_path = Some(job.command.clone());
         self.open_vim = true;
+    }
+
+    /// Opens file in external editor
+    /// This function is called from the main loop when the open_vim
+    /// flag is set to true. (see main.rs)
+    pub fn open_file_in_editor(&mut self) {
+        let editor = self.user_options.external_editor.as_str();
+        match &self.vim_path {
+            Some(path) => {
+
+                let mut parts = editor.trim().split_whitespace();
+                let program = parts.next().unwrap_or(" ");
+                let args: Vec<&str> = parts.collect();
+
+                let mut child = Command::new(program)
+                    .args(args)
+                    .arg(path)
+                    .stdin(Stdio::inherit())
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn().expect("Failed to execute command");
+
+                // Wait for the process to finish
+                child.wait().expect("Failed to wait on child");
+
+                self.open_vim = false;
+                self.vim_path = None;
+            }
+            None => {}
+        }
     }
 
     /// Opens the working directory of the selected job in the terminal
@@ -381,8 +336,7 @@ impl App {
             Some(job) => job,
             None => {
                 // if no job is selected, show an error message
-                self.message = Message::new("No job selected");
-                self.message.kind = MessageKind::Error;
+                self.open_error_message("No job selected");
                 return;
             }
         };
@@ -403,8 +357,7 @@ impl App {
             Some(job) => job,
             None => {
                 // if no job is selected, show an error message
-                self.message = Message::new("No job selected");
-                self.message.kind = MessageKind::Error;
+                self.open_error_message("No job selected");
                 return;
             }
         };
@@ -412,8 +365,7 @@ impl App {
         // if not, there will be no node to ssh to
         if job.status != JobStatus::Running {
             // print an error message if the job is not running
-            self.message = Message::new("Job not running");
-            self.message.kind = MessageKind::Error;
+            self.open_error_message("Job not running");
             return;
         }
         // get the node list of the job
@@ -429,9 +381,8 @@ impl App {
                 if !output.status.success() {
                     // print an error message if the command was not successful
                     let error_msg = String::from_utf8_lossy(&output.stderr);
-                    self.message = Message::new(
+                    self.open_error_message(
                         &format!("Error getting node list: {}", error_msg));
-                    self.message.kind = MessageKind::Error;
                     return;
                 }
                 // format the node list such that only the first node is taken
@@ -452,8 +403,8 @@ impl App {
             Err(e) => {
                 // print an error message if the squeue command to get the
                 // node list could not be executed
-                self.message = Message::new(&format!("Error getting node list: {}", e));
-                self.message.kind = MessageKind::Error;
+                self.open_error_message(
+                    &format!("Error getting node list: {}", e));
             }
         }
     }

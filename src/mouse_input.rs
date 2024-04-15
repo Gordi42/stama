@@ -39,9 +39,9 @@ impl MouseInput {
 
     pub fn get_position(&self) -> Position {
         if let Some(event) = self.event {
-            return Position::new(event.column, event.row);
+            Position::new(event.column, event.row)
         } else {
-            return Position::new(0, 0);
+            Position::new(0, 0)
         }
     }
 
@@ -66,16 +66,11 @@ impl MouseInput {
 
 
 pub fn mouse_input(app: &mut App, mouse_event: MouseEvent) {
-    app.mouse_input.handled = false;
-    app.mouse_input.event = Some(mouse_event);
-
-    app.message.mouse_input(&mut app.action, &mut app.mouse_input);
-    app.confirmation.mouse_input(&mut app.action, &mut app.mouse_input);
-    app.help_menu.mouse_input(&mut app.action, &mut app.mouse_input);
-    app.user_options_menu.mouse_input(&mut app.action, &mut app.mouse_input);
-    app.job_actions_menu.mouse_input(&mut app.action, &mut app.mouse_input);
-
-    app.job_overview.mouse_input(&mut app.action, &mut app.mouse_input);
+    app.menus.mouse_input(
+        &mut app.action,
+        &mut app.mouse_input,
+        mouse_event,
+        );
 
     app.handle_action();
 }
