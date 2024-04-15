@@ -21,6 +21,10 @@ pub enum Event {
     Resize(u16, u16),
 }
 
+/// A pair of a sender and a receiver
+///
+/// The sender send a boolean to a thread to stop it.
+/// The receiver receives events from the thread.
 pub struct Communicator {
     sender: mpsc::Sender<bool>,
     receiver: mpsc::Receiver<Event>,
@@ -33,6 +37,8 @@ impl Communicator {
 }
 
 /// Terminal event handler.
+/// It spawns a new thread that waits for an event (tick, keystroke, 
+/// or mouse), and parses the event to the main program.
 pub struct EventHandler {
     communicator: Option<Communicator>,
     tick_rate: u64,
@@ -64,6 +70,10 @@ impl EventHandler {
         }
     }
 
+    /// Stop the event handler thread
+    ///
+    /// Sends a signal to the event handling thread, to break out of 
+    /// the loop.
     pub fn stop(&mut self) {
         if let Some(communicator) = &self.communicator {
             communicator.sender.send(true).unwrap();
@@ -71,18 +81,22 @@ impl EventHandler {
         self.communicator = None;
     }
 
+    /// Start the event handler thread.
     pub fn start(&mut self) {
         self.stop();
         let tick_rate = Duration::from_millis(self.tick_rate);
+        // event pipeline
         let (sender, receiver) = mpsc::channel();
+        // stop pipeline
         let (stop_sender, stop_receiver) = mpsc::channel::<bool>();
+        // the sender of the event pipeline and the receiver of the stop 
+        // pipeline move to the thread
         thread::spawn(move || {
             let mut last_tick = Instant::now();
             while !stop_receiver.try_recv().is_ok() {
                 let timeout = tick_rate
                     .checked_sub(last_tick.elapsed())
                     .unwrap_or(tick_rate);
-
 
                 if event::poll(timeout).expect("unable to poll for event") {
                     let send_result = match event::read().expect("unable to read event") {

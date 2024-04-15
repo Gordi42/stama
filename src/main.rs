@@ -5,15 +5,11 @@ use crate::{
     app::App,
     event::{Event, EventHandler},
     tui::Tui,
-    update::update,
-    mouse_input::mouse_input,
     write_output::write_output_file,};
 
 pub mod app;
 pub mod event;
-pub mod ui;
 pub mod tui;
-pub mod update;
 pub mod update_content;
 pub mod mouse_input;
 pub mod job;
@@ -44,8 +40,8 @@ fn main() -> Result<()> {
         // Handle events.
         match tui.events.next()? {
             Event::Tick => {app.update_jobs();}
-            Event::Key(key_event) => update(&mut app, key_event),
-            Event::Mouse(mouse_event) => mouse_input(&mut app, mouse_event),
+            Event::Key(key_event) => app.input(key_event),
+            Event::Mouse(mouse_event) => app.mouse_input(mouse_event),
             Event::Resize(_, _) => {}
         };
         if app.should_set_frame_rate {

@@ -1,4 +1,10 @@
 use std::process::{Command, Stdio};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use ratatui::{
+    prelude::{Alignment, Constraint, Direction, Frame, Layout},
+    style::{Color, Style},
+    widgets::Paragraph,
+};
 
 use crate::menus::MenuContainer;
 use crate::mouse_input::MouseInput;
@@ -86,9 +92,9 @@ impl App {
             open_vim: false,
             vim_path: None,
             exit_command: None,
-            user_options: user_options,
-            joblist: joblist,
-            menus: menus,
+            user_options,
+            joblist,
+            menus,
             mouse_input: MouseInput::new(),
         }
     }
@@ -99,11 +105,6 @@ impl App {
 // ===================================================================
 
 impl App {
-    /// Updates the joblist
-    pub fn update_jobs(&mut self) {
-        self.joblist.update_jobs(&self.user_options);
-    }
-
     /// Handles the action that was set during the tick
     pub fn handle_action(&mut self) {
         match &self.action {
@@ -408,4 +409,73 @@ impl App {
             }
         }
     }
+}
+
+// ===================================================================
+//  Events
+// ===================================================================
+
+impl App {
+    /// Updates the joblist
+    pub fn update_jobs(&mut self) {
+        self.joblist.update_jobs(&self.user_options);
+    }
+
+    /// Handle keyboard input
+    pub fn input(&mut self, key_event: KeyEvent) {
+        // Ctrl + C should always quit, regardless of the input mode
+        match key_event.code {
+            KeyCode::Char('c') | KeyCode::Char('C') => {
+                if key_event.modifiers == KeyModifiers::CONTROL {
+                    self.quit();
+                    return
+                }
+            }
+            _ => {}
+        };
+
+        // pass the key event to the app menus
+        self.menus.input(&mut self.action, key_event);
+
+        self.handle_action();
+    }
+
+    /// Handles mouse input
+    pub fn mouse_input(&mut self, mouse_event: MouseEvent) {
+        self.menus.mouse_input(
+            &mut self.action,
+            &mut self.mouse_input,
+            mouse_event,
+            );
+
+        self.handle_action();
+    }
+
+    /// Render the UI
+    pub fn render(&mut self, f: &mut Frame) {
+
+        let outer_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                [
+                Constraint::Min(3),
+                Constraint::Length(1),
+                ]
+                .as_ref(),
+                )
+            .split(f.size());
+
+        // make a info text at the bottom
+        f.render_widget(
+            Paragraph::new("Press `Ctrl-C` or `q` for exit, `?` for help")
+            .style(Style::default().fg(Color::LightCyan))
+            .alignment(Alignment::Center),
+            outer_layout[1],
+            );
+
+        // render the windows
+        self.menus.render(f, &outer_layout[0], &self.joblist);
+
+    }
+        
 }

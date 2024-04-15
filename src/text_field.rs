@@ -15,7 +15,9 @@ pub enum TextFieldType {
 }
 
 
-
+/// Text field entry that can be edited
+///
+/// Editable entries with a label and a value
 pub struct TextField {
     pub text_area: TextArea<'static>,
     pub field_type: TextFieldType,
@@ -32,7 +34,7 @@ impl TextField {
     pub fn new(label: &str, field_type: TextFieldType) -> Self {
         let mut text_field = Self {
             text_area: TextArea::from([""]),
-            field_type: field_type,
+            field_type,
             active: false,
             focused: false,
             label: label.to_string(),

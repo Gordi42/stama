@@ -2,8 +2,6 @@ use crossterm::event::{MouseEventKind, MouseEvent};
 use std::time::SystemTime;
 use ratatui::layout::Position;
 
-use crate::app::App;
-
 pub struct MouseInput {
     pub event: Option<MouseEvent>,
     pub handled: bool,
@@ -62,15 +60,4 @@ impl MouseInput {
             }
         }
     }
-}
-
-
-pub fn mouse_input(app: &mut App, mouse_event: MouseEvent) {
-    app.menus.mouse_input(
-        &mut app.action,
-        &mut app.mouse_input,
-        mouse_event,
-        );
-
-    app.handle_action();
 }
