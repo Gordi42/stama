@@ -9,13 +9,13 @@ use crossterm::event::{
 
 use crate::{app::Action, mouse_input::MouseInput};
 
-use super::OpenMenu;
+use crate::menus::OpenMenu;
 
 
 /// Job Allocation Menu
 ///
 /// Contains a list of editable presets
-pub struct JobAllocationMenu {
+pub struct SallocMenu {
     pub should_render: bool,
     pub handle_input: bool,
     /// The rectangle where to render the menu (for mouse input)
@@ -30,9 +30,9 @@ pub struct JobAllocationMenu {
 //  CONSTRUCTOR
 // ====================================================================
 
-impl JobAllocationMenu {
-    pub fn new() -> JobAllocationMenu {
-        JobAllocationMenu {
+impl SallocMenu {
+    pub fn new() -> SallocMenu {
+        SallocMenu {
             should_render: false,
             handle_input: false,
             rect: Rect::default(),
@@ -46,7 +46,7 @@ impl JobAllocationMenu {
 //  METHODS
 // ====================================================================
 
-impl JobAllocationMenu {
+impl SallocMenu {
 
     /// Activate the menu
     pub fn activate(&mut self) {
@@ -97,7 +97,7 @@ impl JobAllocationMenu {
 //  RENDERING
 // ====================================================================
 
-impl JobAllocationMenu {
+impl SallocMenu {
     pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
         if !self.should_render { return; }
 
@@ -133,7 +133,7 @@ impl JobAllocationMenu {
 //  USER INPUT
 // ====================================================================
 
-impl JobAllocationMenu {
+impl SallocMenu {
     /// Handle user input for the user settings window
     /// Always returns true (input is always handled)
     pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
@@ -165,7 +165,7 @@ impl JobAllocationMenu {
 //  MOUSE INPUT
 // ====================================================================
 
-impl JobAllocationMenu {
+impl SallocMenu {
     pub fn mouse_input(&mut self, 
                        _action: &mut Action, 
                        mouse_input: &mut MouseInput) {

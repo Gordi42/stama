@@ -559,7 +559,7 @@ impl JobOverview {
             },
             // Open job allocation menu
             KeyCode::Char('a') => {
-                *action = Action::OpenMenu(OpenMenu::JobAllocation);
+                *action = Action::OpenMenu(OpenMenu::Salloc);
             },
             KeyCode::Char('o') => {
                 *action = Action::OpenMenu(OpenMenu::UserOptions);
