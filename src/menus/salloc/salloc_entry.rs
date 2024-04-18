@@ -27,8 +27,42 @@ impl SallocEntry {
             nodes: String::new(),
             cpus_per_node: String::new(),
             memory: String::new(),
-            time_limit: String::new(),
+            time_limit: "01:00:00".to_string(),
             other_options: String::new(),
         }
+    }
+}
+
+// ====================================================================
+//  METHODS
+// ====================================================================
+
+impl SallocEntry {
+    /// Start the salloc command with the parameters 
+    /// stored in this SallocEntry.
+    pub fn start(&self) -> String {
+        let mut cmd = "salloc".to_string();
+        if !self.partition.is_empty() {
+            cmd.push_str(&format!(" --partition={}", self.partition));
+        }
+        if !self.nodes.is_empty() {
+            cmd.push_str(&format!(" -N {}", self.nodes));
+        }
+        if !self.cpus_per_node.is_empty() {
+            cmd.push_str(&format!(" --ntasks-per-node={}", self.cpus_per_node));
+        }
+        if !self.memory.is_empty() {
+            cmd.push_str(&format!(" --mem={}", self.memory));
+        }
+        if !self.time_limit.is_empty() {
+            cmd.push_str(&format!(" --time={}", self.time_limit));
+        }
+        if !self.other_options.is_empty() {
+            cmd.push_str(&format!(" {}", self.other_options));
+        }
+        if !self.preset_name.is_empty() {
+            cmd.push_str(&format!(" --job-name={}", self.preset_name));
+        }
+        cmd
     }
 }

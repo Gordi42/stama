@@ -53,6 +53,11 @@ fn main() -> Result<()> {
             app.open_file_in_editor();
             tui.enter()?;
         }
+        if app.should_execute_command {
+            tui.exit()?;
+            app.start_salloc();
+            tui.enter()?;
+        }
 
     }
     // Exit the user interface.

@@ -35,7 +35,9 @@ pub enum Action {
     /// Updates the joblist (e.g. job selection, job sorting, etc.)
     UpdateJobList(JobListAction),
     /// Handles a job action (e.g. kill, open log)
-    JobOption(JobActions)
+    JobOption(JobActions),
+    /// Start the salloc command with the parameters
+    StartSalloc(String),
 }
 
 
@@ -52,6 +54,8 @@ pub struct App {
     pub should_set_frame_rate: bool,
     /// If true, the application should redraw the tui
     pub should_redraw: bool,
+    /// If true, the application should execute the given command
+    pub should_execute_command: bool,
     /// To open vim, tui must be closed. Hence they must be handled in 
     /// the main loop
     pub open_vim: bool,
@@ -60,6 +64,8 @@ pub struct App {
     // This command will be written to a given file (for execution after 
     // closing stama)
     pub exit_command: Option<String>,
+    /// A buffer for a command
+    command: String,
     /// The user options
     pub user_options: UserOptions,
     // The joblist is the main data structure that holds all the jobs
@@ -89,9 +95,11 @@ impl App {
             should_quit: false,
             should_set_frame_rate: false,
             should_redraw: true,
+            should_execute_command: false,
             open_vim: false,
             vim_path: None,
             exit_command: None,
+            command: "".to_string(),
             user_options,
             joblist,
             menus,
@@ -125,6 +133,10 @@ impl App {
             }
             Action::JobOption(action) => {
                 self.handle_job_action(action.clone());
+            }
+            Action::StartSalloc(cmd) => {
+                self.should_execute_command = true;
+                self.command = cmd.to_string();
             }
             _ => {}
         };
@@ -408,6 +420,23 @@ impl App {
                     &format!("Error getting node list: {}", e));
             }
         }
+    }
+
+    /// Start the Salloc Command
+    pub fn start_salloc(&mut self) {
+        let mut parts = self.command.trim().split_whitespace();
+        let program = parts.next().unwrap_or(" ");
+        let args: Vec<&str> = parts.collect();
+        let mut child = Command::new(program)
+            .args(args)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn().expect("Failed to execute command");
+
+        // Wait for the process to finish
+        child.wait().expect("Failed to wait on child");
+        self.menus.message = Message::new("Starting salloc command...");
     }
 }
 
