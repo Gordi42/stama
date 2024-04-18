@@ -49,6 +49,9 @@ impl EntryMenu {
                 "Preset Name", 
                 TextFieldType::Text(entry.preset_name)),
             TextField::new(
+                "Account", 
+                TextFieldType::Text(entry.account)),
+            TextField::new(
                 "Partition", 
                 TextFieldType::Text(entry.partition)),
             TextField::new(
@@ -120,32 +123,37 @@ impl EntryMenu {
             TextFieldType::Text(s) => s.clone(),
             _ => "error".to_string(),
         };
-        let partition = match &self.entries[1].field_type {
+        let account = match &self.entries[1].field_type {
             TextFieldType::Text(s) => s.clone(),
             _ => "error".to_string(),
         };
-        let nodes = match &self.entries[2].field_type {
+        let partition = match &self.entries[2].field_type {
             TextFieldType::Text(s) => s.clone(),
             _ => "error".to_string(),
         };
-        let cpus_per_node = match &self.entries[3].field_type {
+        let nodes = match &self.entries[3].field_type {
             TextFieldType::Text(s) => s.clone(),
             _ => "error".to_string(),
         };
-        let memory = match &self.entries[4].field_type {
+        let cpus_per_node = match &self.entries[4].field_type {
             TextFieldType::Text(s) => s.clone(),
             _ => "error".to_string(),
         };
-        let time_limit = match &self.entries[5].field_type {
+        let memory = match &self.entries[5].field_type {
             TextFieldType::Text(s) => s.clone(),
             _ => "error".to_string(),
         };
-        let other_options = match &self.entries[6].field_type {
+        let time_limit = match &self.entries[6].field_type {
+            TextFieldType::Text(s) => s.clone(),
+            _ => "error".to_string(),
+        };
+        let other_options = match &self.entries[7].field_type {
             TextFieldType::Text(s) => s.clone(),
             _ => "error".to_string(),
         };
         SallocEntry {
             preset_name,
+            account,
             partition,
             nodes,
             cpus_per_node,

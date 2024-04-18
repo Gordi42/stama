@@ -424,6 +424,7 @@ impl App {
 
     /// Start the Salloc Command
     pub fn start_salloc(&mut self) {
+        println!("{}", self.command);
         let mut parts = self.command.trim().split_whitespace();
         let program = parts.next().unwrap_or(" ");
         let args: Vec<&str> = parts.collect();

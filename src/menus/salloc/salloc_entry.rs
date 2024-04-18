@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SallocEntry {
     pub preset_name: String,
+    pub account: String,
     pub partition: String,
     pub nodes: String,
     pub cpus_per_node: String,
@@ -23,6 +24,7 @@ impl SallocEntry {
     pub fn new() -> Self {
         SallocEntry {
             preset_name: "new".to_string(), // "new" is the default preset name
+            account: String::new(),
             partition: String::new(),
             nodes: String::new(),
             cpus_per_node: String::new(),
@@ -42,6 +44,9 @@ impl SallocEntry {
     /// stored in this SallocEntry.
     pub fn start(&self) -> String {
         let mut cmd = "salloc".to_string();
+        if !self.account.is_empty() {
+            cmd.push_str(&format!(" --account={}", self.account));
+        }
         if !self.partition.is_empty() {
             cmd.push_str(&format!(" --partition={}", self.partition));
         }
