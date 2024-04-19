@@ -441,6 +441,10 @@ impl App {
             let msg = format!("Error starting salloc command: {}", 
                               output_status.err().unwrap());
             self.open_error_message(&msg);
+        } else {
+            let mut child = output_status.unwrap();
+            // Wait for the process to finish
+            child.wait().expect("Failed to wait on child");
         }
 
         self.should_execute_command = false;
