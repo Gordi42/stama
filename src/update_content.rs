@@ -1,3 +1,5 @@
+use regex::Regex;
+
 use crate::job::Job;
 use std::sync::mpsc;
 use std::thread;
@@ -275,6 +277,26 @@ pub fn format_squeue_output(output: &str) -> Vec<Job> {
         let mut output = parts[9].to_string();
         output = output.replace("%j", &id);
         output = output.replace("%x", &name);
+        // we also want to cover the case when %<number>j is used 
+        // where <number> is the minimum number of digits to be used 
+        // leading zeros are added if the number of digits is less than <number>
+        // Define a regular expression pattern to match %<n>j
+        let re = Regex::new(r"%\d+j").unwrap();
+
+        // Use the replace_all method to replace all occurrences of the pattern with the job ID
+        re.replace_all(&output, |caps: &regex::Captures| {
+            // Extract the matched number from the pattern
+            let num_str = &caps[0][1..caps[0].len() - 1];
+            // Parse the number as usize
+            if let Ok(num) = num_str.parse::<usize>() {
+                // Generate the replacement string with the job ID
+                format!("{:0width$}", id, width = num)
+            } else {
+                // If parsing fails, return the original match
+                caps[0].to_string()
+            }
+        });
+
         joblist.push(Job::new(&id, &name, status, 
                               &time, &partition, nodes,
                               &workdir, &command, Some(output)));
