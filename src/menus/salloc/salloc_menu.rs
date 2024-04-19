@@ -27,6 +27,12 @@ pub struct SallocMenu {
     handle_input: bool,
     /// The rectangle where to render the menu (for mouse input)
     rect: Rect,
+    /// The presets pane: 
+    /// Rectangle where the presets list is rendered
+    preset_pane: Rect,
+    /// The settings pane: 
+    /// Rectangle where the settings list is rendered
+    settings_pane: Rect,
     /// The list of salloc entries
     salloc_list: SallocList<SallocEntry>,
     /// The entry info menu
@@ -50,6 +56,8 @@ impl SallocMenu {
             handle_input: false,
             salloc_list,
             rect: Rect::default(),
+            preset_pane: Rect::default(),
+            settings_pane: Rect::default(),
             entry_menu: EntryMenu::new(None),
             state: ListState::default(),
             focus: Focus::List,
@@ -108,19 +116,25 @@ impl SallocMenu {
         };
     }
 
+    /// Acitvate the Presets Menu
+    fn focus_preset(&mut self) {
+        self.entry_menu.is_active = false;
+        // save the entry (ignore errors)
+        let _ = self.salloc_list.save(None);
+        self.focus = Focus::List
+    }
+
+    /// Activate the Settings Menu
+    fn focus_settings(&mut self) {
+        self.entry_menu.is_active = true;
+        self.focus = Focus::Entry
+    }
+
     /// Switch focus between list and entry
     fn toggle_focus(&mut self) {
-        self.focus = match self.focus {
-            Focus::List => {
-                self.entry_menu.is_active = true;
-                Focus::Entry
-            },
-            Focus::Entry => {
-                self.entry_menu.is_active = false;
-                // save the entry (ignore errors)
-                let _ = self.salloc_list.save(None);
-                Focus::List
-            },
+        match self.focus {
+            Focus::List => self.focus_settings(),
+            Focus::Entry => self.focus_preset(),
         }
     }
 
@@ -148,6 +162,34 @@ impl SallocMenu {
         self.salloc_list.entries[index] = entry;
     }
 
+    /// Start the selected salloc entry
+    /// If no entry is selected, create a new one
+    fn start_salloc(&mut self, action: &mut Action) {
+        match self.get_salloc_entry() {
+            Some(entry) => {
+                let cmd = entry.start();
+                *action = Action::StartSalloc(cmd);
+                self.deactivate();
+            }
+            None => {
+                self.create_new_salloc_entry();
+            }
+        }
+    }
+
+    /// Delete the currently selected entry
+    /// If the selection is on the create new entry, do nothing
+    fn delete_current_entry(&mut self) {
+        let index = match self.state.selected() {
+            Some(ind) => ind,
+            None => return
+        };
+        if index == self.salloc_list.len() {
+            return;
+        }
+        self.salloc_list.entries.remove(index);
+        self.set_index(index as i32);
+    }
 }
 
 // ====================================================================
@@ -196,6 +238,10 @@ impl SallocMenu {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
             .split(block.inner(rect));
+
+        // update the panes
+        self.preset_pane = layout[0];
+        self.settings_pane = layout[1];
 
         self.render_list(f, &layout[0]);
         self.render_entry(f, &layout[1]);
@@ -305,17 +351,11 @@ impl SallocMenu {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.previous();
             }
-            KeyCode::Enter => {
-                match self.get_salloc_entry() {
-                    Some(entry) => {
-                        let cmd = entry.start();
-                        *action = Action::StartSalloc(cmd);
-                        self.deactivate();
-                    }
-                    None => {
-                        self.create_new_salloc_entry();
-                    }
-                }
+            KeyCode::Enter | KeyCode::Char('l') => {
+                self.start_salloc(action);
+            }
+            KeyCode::Char('d') => {
+                self.delete_current_entry();
             }
             KeyCode::Char('?') => {
                 *action = Action::OpenMenu(OpenMenu::Help(2));
@@ -362,11 +402,11 @@ impl SallocMenu {
 // ====================================================================
 
 impl SallocMenu {
-    pub fn mouse_input(&mut self, _action: &mut Action, mouse_input: &mut MouseInput) {
+    pub fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
         if !self.handle_input {
             return;
         }
-
+        // first update the focused window pane
         if let Some(mouse_event_kind) = mouse_input.kind() {
             match mouse_event_kind {
                 MouseEventKind::Down(MouseButton::Left) => {
@@ -376,7 +416,22 @@ impl SallocMenu {
                         mouse_input.click();
                         return;
                     }
+                    if self.preset_pane.contains(mouse_input.get_position()) {
+                        self.focus_preset();
+                        self.mouse_input_list(action, mouse_input);
+                    } else if self.settings_pane.contains(mouse_input.get_position()) {
+                        self.focus_settings();
+                        self.entry_menu.mouse_input(action, mouse_input);
+                    }
                 }
+                _ => {}
+            }
+        };
+        
+
+        // check for scroll events
+        if let Some(mouse_event_kind) = mouse_input.kind() {
+            match mouse_event_kind {
                 // scrolling
                 MouseEventKind::ScrollUp => {
                     self.previous();
@@ -389,5 +444,20 @@ impl SallocMenu {
             // Set the mouse event to handled
             mouse_input.handled = true;
         }
+    }
+
+    /// Handle mouse input for the list window
+    fn mouse_input_list(&mut self, action: &mut Action,
+                        mouse_input: &mut MouseInput) {
+        let mouse_pos = mouse_input.get_position();
+        let mut rel_y = mouse_pos.y - self.preset_pane.y;
+        // adjust for the border
+        rel_y = rel_y.saturating_sub(1);
+        let new_index = rel_y as usize + self.state.offset();
+        self.set_index(new_index as i32);
+        if mouse_input.is_double_click() {
+            self.start_salloc(action);
+        }
+        mouse_input.click();
     }
 }

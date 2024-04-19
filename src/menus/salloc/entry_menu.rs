@@ -4,8 +4,9 @@ use ratatui::{
     layout::Layout,
 };
 use crossterm::event::{
-    KeyCode, KeyEvent};
+    KeyCode, KeyEvent, MouseButton, MouseEventKind};
 
+use crate::mouse_input::MouseInput;
 use crate::text_field::{TextField, TextFieldType};
 use crate::app::Action;
 
@@ -240,5 +241,35 @@ impl EntryMenu {
             _ => {}
         }
         false
+    }
+}
+
+// ====================================================================
+//  MOUSE INPUT
+// ====================================================================
+
+impl EntryMenu {
+    pub fn mouse_input(&mut self, _action: &mut Action, mouse_input: &mut MouseInput) {
+        // first update the focused window pane
+        if let Some(mouse_event_kind) = mouse_input.kind() {
+            match mouse_event_kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    // check if the user clicked on a text field
+                    for (i, rect) in self.rects.iter().enumerate() {
+                        if rect.contains(mouse_input.get_position()) {
+                            self.set_index(i as i32 + self.offset as i32);
+                            // check if the click is a double click
+                            if mouse_input.is_double_click() {
+                                self.entries[self.index as usize].on_enter();
+                            }
+                            mouse_input.click();
+                            return;
+                        }
+                    }
+                
+                }
+                _ => {}
+            }
+        };
     }
 }

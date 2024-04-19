@@ -87,7 +87,18 @@ impl HelpMenu {
             "Job Actions", job_actions_entries);
         // allocation menu category
         let allocation_menu_entries = vec![
-            HelpEntry::new("", "not implemented yet"),
+            HelpEntry::new(
+                "Esc (q)", 
+                "Close allocation menu"),
+            HelpEntry::new(
+                "Tab", 
+                "Switch focus between presets and settings panes"),
+            HelpEntry::new(
+                "Down/Up (j/k)", 
+                "Next/Previous entry"),
+            HelpEntry::new("Enter", 
+                           "If Presets is focused => Execute salloc command
+                           If Settings is focused => Edit setting"),
         ];
         let allocation_menu = HelpCategory::new(
             "Allocation Menu", allocation_menu_entries);
