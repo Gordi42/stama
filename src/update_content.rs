@@ -1,5 +1,3 @@
-use regex::Regex;
-
 use crate::job::Job;
 use std::sync::mpsc;
 use std::thread;
@@ -120,7 +118,7 @@ fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Conte
     let (tx_log, rx_log) = mpsc::channel();
     let handle_log = match job {
         Some(ref job) => {
-            match job.output {
+            match job.get_stdout() {
                 Some(ref output) => {
                     let log_path = output.clone();
                     thread::spawn(move || {
@@ -274,61 +272,13 @@ pub fn format_squeue_output(output: &str) -> Vec<Job> {
         let nodes = parts[6].parse::<u32>().unwrap_or(0);
         let workdir = parts[7].to_string();
         let command = parts[8].to_string();
-        let output = format_stdout(parts[9], &id, &name);
-        // output = output.replace("%j", &id);
-        // output = output.replace("%x", &name);
-        // we also want to cover the case when %<number>j is used 
-        // where <number> is the minimum number of digits to be used 
-        // leading zeros are added if the number of digits is less than <number>
-        // Define a regular expression pattern to match %<n>j
-        // let re = Regex::new(r"%\d+j").unwrap();
-        //
-        // // Use the replace_all method to replace all occurrences of the pattern with the job ID
-        // re.replace_all(&output, |caps: &regex::Captures| {
-        //     // Extract the matched number from the pattern
-        //     let num_str = &caps[0][1..caps[0].len() - 1];
-        //     // Parse the number as usize
-        //     if let Ok(num) = num_str.parse::<usize>() {
-        //         // Generate the replacement string with the job ID
-        //         format!("{:0width$}", id, width = num)
-        //     } else {
-        //         // If parsing fails, return the original match
-        //         caps[0].to_string()
-        //     }
-        // });
+        let output = parts[9].to_string();
 
         joblist.push(Job::new(&id, &name, status, 
                               &time, &partition, nodes,
                               &workdir, &command, Some(output)));
     }
     joblist
-}
-
-/// format the stdout of the command
-/// replace %j with the job id and %x with the job name
-fn format_stdout(output: &str, job_id: &str, job_name: &str) -> String {
-    let mut output = output.to_string();
-    output = output.replace("%j", job_id);
-    output = output.replace("%x", job_name);
-    // we also want to cover the case when %<number>j is used 
-    // where <number> is the minimum number of digits to be used 
-    // leading zeros are added if the number of digits is less than <number>
-    // Define a regular expression pattern to match %<n>j
-    let re = Regex::new(r"%\d+j").unwrap();
-
-    // Use the replace_all method to replace all occurrences of the pattern with the job ID
-    re.replace_all(&output, |caps: &regex::Captures| {
-        // Extract the matched number from the pattern
-        let num_str = &caps[0][1..caps[0].len() - 1];
-        // Parse the number as usize
-        if let Ok(num) = num_str.parse::<usize>() {
-            // Generate the replacement string with the job ID
-            format!("{:0>width$}", job_id, width = num)
-        } else {
-            // If parsing fails, return the original match
-            caps[0].to_string()
-        }
-    }).to_string()
 }
 
 fn get_acct_joblist(command: &str) -> Vec<Job> {

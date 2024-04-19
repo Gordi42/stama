@@ -338,7 +338,7 @@ impl JobList {
             },
             SortCategory::Nodes => {
                 self.jobs.sort_by(|a, b| {
-                    a.nodes.cmp(&b.nodes).then_with(|| a.id.cmp(&b.id))
+                    b.nodes.cmp(&a.nodes).then_with(|| a.id.cmp(&b.id))
                 });
             },
         }

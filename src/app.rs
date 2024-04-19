@@ -280,7 +280,8 @@ impl App {
             }
         };
         // try to get the log file path from the job
-        let log_path = if let Some(log_path) = &job.output {
+        let output = job.get_stdout();
+        let log_path = if let Some(log_path) = &output {
             log_path
         } else {
             self.open_error_message("No log file found");

@@ -1,3 +1,5 @@
+use regex::Regex;
+
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum JobStatus {
@@ -99,6 +101,38 @@ impl Job {
 impl Job {
     pub fn get_jobname(&self) -> String {
         self.name.clone()
+    }
+
+    /// format the stdout of the command
+    /// replace %j with the job id and %x with the job name
+    pub fn get_stdout(&self) -> Option<String> {
+        match &self.output {
+            Some(output) => {
+                let mut output = output.to_string();
+                output = output.replace("%j", &self.id);
+                output = output.replace("%x", &self.name);
+                // we also want to cover the case when %<number>j is used 
+                // where <number> is the minimum number of digits to be used 
+                // leading zeros are added if the number of digits is less than <number>
+                // Define a regular expression pattern to match %<n>j
+                let re = Regex::new(r"%\d+j").unwrap();
+
+                // Use the replace_all method to replace all occurrences of the pattern with the job ID
+                Some(re.replace_all(&output, |caps: &regex::Captures| {
+                    // Extract the matched number from the pattern
+                    let num_str = &caps[0][1..caps[0].len() - 1];
+                    // Parse the number as usize
+                    if let Ok(num) = num_str.parse::<usize>() {
+                        // Generate the replacement string with the job ID
+                        format!("{:0>width$}", &self.id, width = num)
+                    } else {
+                        // If parsing fails, return the original match
+                        caps[0].to_string()
+                    }
+                }).to_string())
+            },
+            None => None,
+        }
     }
 
     pub fn is_completed(&self) -> bool {
