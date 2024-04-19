@@ -30,6 +30,10 @@ pub enum Action {
     ConfirmedQuit,
     /// Opens a selected menu
     OpenMenu(OpenMenu),
+    /// Remove Salloc Entry (Confirmation Dialog)
+    RemoveSallocEntryDialog,
+    /// Remove Salloc Entry (Confirmed)
+    RemoveSallocEntry,
     /// Updates the user options from the user options menu
     UpdateUserOptions,
     /// Updates the joblist (e.g. job selection, job sorting, etc.)
@@ -138,6 +142,12 @@ impl App {
                 self.should_execute_command = true;
                 self.command = cmd.to_string();
             }
+            Action::RemoveSallocEntryDialog => {
+                self.open_remove_salloc_entry_dialog();
+            }
+            Action::RemoveSallocEntry => {
+                self.menus.salloc_menu.delete_current_entry();
+            }
             _ => {}
         };
         // reset the action
@@ -197,6 +207,13 @@ impl App {
     fn open_error_message(&mut self, msg: &str) {
         self.menus.message = Message::new(msg);
         self.menus.message.kind = MessageKind::Error;
+    }
+
+    /// Open remove salloc entry dialog
+    fn open_remove_salloc_entry_dialog(&mut self) {
+        self.menus.confirmation = Confirmation::new(
+            "Are your sure you want to remove the entry?", 
+            Action::RemoveSallocEntry);
     }
 
 

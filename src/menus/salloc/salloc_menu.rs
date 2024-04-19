@@ -179,7 +179,7 @@ impl SallocMenu {
 
     /// Delete the currently selected entry
     /// If the selection is on the create new entry, do nothing
-    fn delete_current_entry(&mut self) {
+    pub fn delete_current_entry(&mut self) {
         let index = match self.state.selected() {
             Some(ind) => ind,
             None => return
@@ -188,7 +188,7 @@ impl SallocMenu {
             return;
         }
         self.salloc_list.entries.remove(index);
-        self.set_index(index as i32);
+        self.set_index((index as i32).saturating_sub(1));
     }
 }
 
@@ -355,7 +355,10 @@ impl SallocMenu {
                 self.start_salloc(action);
             }
             KeyCode::Char('d') => {
-                self.delete_current_entry();
+                // check if the user is trying to delete an existing entry
+                if self.get_salloc_entry().is_some() {
+                    *action = Action::RemoveSallocEntryDialog;
+                }
             }
             KeyCode::Char('?') => {
                 *action = Action::OpenMenu(OpenMenu::Help(2));
@@ -418,20 +421,43 @@ impl SallocMenu {
                     }
                     if self.preset_pane.contains(mouse_input.get_position()) {
                         self.focus_preset();
-                        self.mouse_input_list(action, mouse_input);
                     } else if self.settings_pane.contains(mouse_input.get_position()) {
                         self.focus_settings();
-                        self.entry_menu.mouse_input(action, mouse_input);
                     }
                 }
                 _ => {}
             }
         };
-        
 
-        // check for scroll events
+        // handle the mouse input for the focused window pane
+        match self.focus {
+            Focus::List => self.mouse_input_list(action, mouse_input),
+            Focus::Entry => self.entry_menu.mouse_input(action, mouse_input),
+        }
+
+        // Set the mouse event to handled
+        mouse_input.handled = true;
+    }
+
+    /// Handle mouse input for the list window
+    fn mouse_input_list(&mut self, action: &mut Action,
+                        mouse_input: &mut MouseInput) {
+
         if let Some(mouse_event_kind) = mouse_input.kind() {
             match mouse_event_kind {
+                // clicking
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let mouse_pos = mouse_input.get_position();
+                    let mut rel_y = mouse_pos.y - self.preset_pane.y;
+                    // adjust for the border
+                    rel_y = rel_y.saturating_sub(1);
+                    let new_index = rel_y as usize + self.state.offset();
+                    self.set_index(new_index as i32);
+                    if mouse_input.is_double_click() {
+                        self.start_salloc(action);
+                    }
+                    mouse_input.click();
+                }
                 // scrolling
                 MouseEventKind::ScrollUp => {
                     self.previous();
@@ -441,23 +467,6 @@ impl SallocMenu {
                 }
                 _ => {}
             }
-            // Set the mouse event to handled
-            mouse_input.handled = true;
         }
-    }
-
-    /// Handle mouse input for the list window
-    fn mouse_input_list(&mut self, action: &mut Action,
-                        mouse_input: &mut MouseInput) {
-        let mouse_pos = mouse_input.get_position();
-        let mut rel_y = mouse_pos.y - self.preset_pane.y;
-        // adjust for the border
-        rel_y = rel_y.saturating_sub(1);
-        let new_index = rel_y as usize + self.state.offset();
-        self.set_index(new_index as i32);
-        if mouse_input.is_double_click() {
-            self.start_salloc(action);
-        }
-        mouse_input.click();
     }
 }

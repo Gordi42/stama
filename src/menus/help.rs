@@ -99,6 +99,9 @@ impl HelpMenu {
             HelpEntry::new("Enter", 
                            "If Presets is focused => Execute salloc command
                            If Settings is focused => Edit setting"),
+            HelpEntry::new(
+                "d", 
+                "Delete the selected preset"),
         ];
         let allocation_menu = HelpCategory::new(
             "Allocation Menu", allocation_menu_entries);

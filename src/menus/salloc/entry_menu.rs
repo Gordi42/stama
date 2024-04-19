@@ -94,6 +94,7 @@ impl EntryMenu {
 
 impl EntryMenu {
     pub fn set_index(&mut self, index: i32) {
+        self.entries[self.index as usize].active = false;
         self.set_focus(self.index as usize, false);
         let max_ind = self.entries.len() as i32 - 1;
         let mut new_index = index;
@@ -250,6 +251,10 @@ impl EntryMenu {
 
 impl EntryMenu {
     pub fn mouse_input(&mut self, _action: &mut Action, mouse_input: &mut MouseInput) {
+        // check if the text edit is not active
+        if self.entries[self.index as usize].active {
+            return;
+        }
         // first update the focused window pane
         if let Some(mouse_event_kind) = mouse_input.kind() {
             match mouse_event_kind {
@@ -267,6 +272,13 @@ impl EntryMenu {
                         }
                     }
                 
+                }
+                // scrolling
+                MouseEventKind::ScrollUp => {
+                    self.previous();
+                }
+                MouseEventKind::ScrollDown => {
+                    self.next();
                 }
                 _ => {}
             }
