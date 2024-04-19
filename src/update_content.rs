@@ -274,34 +274,61 @@ pub fn format_squeue_output(output: &str) -> Vec<Job> {
         let nodes = parts[6].parse::<u32>().unwrap_or(0);
         let workdir = parts[7].to_string();
         let command = parts[8].to_string();
-        let mut output = parts[9].to_string();
-        output = output.replace("%j", &id);
-        output = output.replace("%x", &name);
+        let output = format_stdout(parts[9], &id, &name);
+        // output = output.replace("%j", &id);
+        // output = output.replace("%x", &name);
         // we also want to cover the case when %<number>j is used 
         // where <number> is the minimum number of digits to be used 
         // leading zeros are added if the number of digits is less than <number>
         // Define a regular expression pattern to match %<n>j
-        let re = Regex::new(r"%\d+j").unwrap();
-
-        // Use the replace_all method to replace all occurrences of the pattern with the job ID
-        re.replace_all(&output, |caps: &regex::Captures| {
-            // Extract the matched number from the pattern
-            let num_str = &caps[0][1..caps[0].len() - 1];
-            // Parse the number as usize
-            if let Ok(num) = num_str.parse::<usize>() {
-                // Generate the replacement string with the job ID
-                format!("{:0width$}", id, width = num)
-            } else {
-                // If parsing fails, return the original match
-                caps[0].to_string()
-            }
-        });
+        // let re = Regex::new(r"%\d+j").unwrap();
+        //
+        // // Use the replace_all method to replace all occurrences of the pattern with the job ID
+        // re.replace_all(&output, |caps: &regex::Captures| {
+        //     // Extract the matched number from the pattern
+        //     let num_str = &caps[0][1..caps[0].len() - 1];
+        //     // Parse the number as usize
+        //     if let Ok(num) = num_str.parse::<usize>() {
+        //         // Generate the replacement string with the job ID
+        //         format!("{:0width$}", id, width = num)
+        //     } else {
+        //         // If parsing fails, return the original match
+        //         caps[0].to_string()
+        //     }
+        // });
 
         joblist.push(Job::new(&id, &name, status, 
                               &time, &partition, nodes,
                               &workdir, &command, Some(output)));
     }
     joblist
+}
+
+/// format the stdout of the command
+/// replace %j with the job id and %x with the job name
+fn format_stdout(output: &str, job_id: &str, job_name: &str) -> String {
+    let mut output = output.to_string();
+    output = output.replace("%j", job_id);
+    output = output.replace("%x", job_name);
+    // we also want to cover the case when %<number>j is used 
+    // where <number> is the minimum number of digits to be used 
+    // leading zeros are added if the number of digits is less than <number>
+    // Define a regular expression pattern to match %<n>j
+    let re = Regex::new(r"%\d+j").unwrap();
+
+    // Use the replace_all method to replace all occurrences of the pattern with the job ID
+    re.replace_all(&output, |caps: &regex::Captures| {
+        // Extract the matched number from the pattern
+        let num_str = &caps[0][1..caps[0].len() - 1];
+        // Parse the number as usize
+        if let Ok(num) = num_str.parse::<usize>() {
+            // Generate the replacement string with the job ID
+            format!("{:0>width$}", job_id, width = num)
+        } else {
+            // If parsing fails, return the original match
+            caps[0].to_string()
+        }
+    }).to_string()
 }
 
 fn get_acct_joblist(command: &str) -> Vec<Job> {
@@ -449,5 +476,26 @@ fn format_time_pending(time_str: &str) -> String {
     let minutes = (time_in_sec % 3600) / 60;
     let seconds = time_in_sec % 60;
     format!("{}-{:02}:{:02}:{:02}", days, hours, minutes, seconds)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_stdout() {
+        let output = "output_%j_%x";
+        let job_id = "123456";
+        let job_name = "job_name";
+        let expected = "output_123456_job_name";
+        assert_eq!(format_stdout(output, job_id, job_name), expected);
+
+        let output = "output_%j_%x_%3j_%4j_%5j";
+        let job_id = "1234";
+        let job_name = "job_name";
+        let expected = "output_1234_job_name_1234_1234_01234";
+        assert_eq!(format_stdout(output, job_id, job_name), expected);
+    }
 }
 
