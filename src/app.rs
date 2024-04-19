@@ -428,16 +428,21 @@ impl App {
         let mut parts = self.command.trim().split_whitespace();
         let program = parts.next().unwrap_or(" ");
         let args: Vec<&str> = parts.collect();
-        let mut child = Command::new(program)
+        let output_status = Command::new(program)
             .args(args)
             .arg("--no-shell")
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
-            .spawn().expect("Failed to execute command");
+            .spawn(); //.expect("Failed to execute command");
 
-        // Wait for the process to finish
-        child.wait().expect("Failed to wait on child");
+        // open a error dialog if the command could not be executed
+        if output_status.is_err() {
+            let msg = format!("Error starting salloc command: {}", 
+                              output_status.err().unwrap());
+            self.open_error_message(&msg);
+        }
+
         self.should_execute_command = false;
     }
 }
