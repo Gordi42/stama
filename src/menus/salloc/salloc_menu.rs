@@ -137,7 +137,6 @@ impl SallocMenu {
     /// Create a new salloc entry
     fn create_new_salloc_entry(&mut self) {
         self.salloc_list.entries.push(SallocEntry::new());
-        self.toggle_focus();
     }
 
     /// set the current entry to the given entry

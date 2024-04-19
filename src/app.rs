@@ -430,6 +430,7 @@ impl App {
         let args: Vec<&str> = parts.collect();
         let mut child = Command::new(program)
             .args(args)
+            .arg("--no-shell")
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -437,7 +438,7 @@ impl App {
 
         // Wait for the process to finish
         child.wait().expect("Failed to wait on child");
-        self.menus.message = Message::new("Starting salloc command...");
+        self.should_execute_command = false;
     }
 }
 
