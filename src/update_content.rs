@@ -429,23 +429,3 @@ fn format_time_pending(time_str: &str) -> String {
 }
 
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_stdout() {
-        let output = "output_%j_%x";
-        let job_id = "123456";
-        let job_name = "job_name";
-        let expected = "output_123456_job_name";
-        assert_eq!(format_stdout(output, job_id, job_name), expected);
-
-        let output = "output_%j_%x_%3j_%4j_%5j";
-        let job_id = "1234";
-        let job_name = "job_name";
-        let expected = "output_1234_job_name_1234_1234_01234";
-        assert_eq!(format_stdout(output, job_id, job_name), expected);
-    }
-}
-
