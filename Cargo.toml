@@ -1,7 +1,10 @@
 [package]
 name = "stama"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
+authors = ["Silvano Gordian Rosenau <silvano.rosenau@uni-hamburg.de>"]
+description = "A terminal user interface for monitoring and managing slurm jobs."
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
