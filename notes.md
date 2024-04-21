@@ -2,12 +2,12 @@
 
 - Job Overview: top level, showing a list of running jobs
     - full screen
-- Job Actions: Job actions (kill, suspend, resume, etc.)
+- Job Actions: Job actions (kill, etc.)
     - floating window
 - Options: options for the user
     - floating window
 - Job Allocation: code-remote like menu for job allocation
-    - full screen
+    - floating window
 - Help: help for the user
     - floating window
 - Confirmation: confirmation dialog
@@ -34,7 +34,6 @@
 - Enter (l): Open job actions menu
 - tab: Switch between sorting option
 - r: reverse sorting order
-- Left/Right: Switch focus between job details and log
 - 1: Focus on job details
 - 2: Focus on log
 - a: Open allocation menu
@@ -46,7 +45,7 @@
 ## Color Codes
 - Running: Green
 - Queued: Yellow
-- Suspended: Orange
+- Failed: Red
 - Completed: Gray
 
 ## Job details
@@ -132,7 +131,6 @@ Note: If a wrapper script is used, the return string is executed in the shell
 
 ## Controls
 - Tab: Switch between presets and settings
-- Right/Left (h/l): Switch between presets and settings
 - Esc: Close menu
 ### Presets
 - Down/Up (j/k): Next/Previous preset
@@ -147,15 +145,10 @@ Note: If a wrapper script is used, the return string is executed in the shell
 -- Background ------------------------------------------
 |                                                      |
 |     - Help -------------------------------------     |
-|     | Job Overview (red)                       |     |
+|     | Job Overview                             |     |
 |     |   Down/Up (j/k): Next/Previous job       |     |
 |     |   ...                                    |     |
-|     | Job Actions (red)                        |     |
-|     |   ...                                    |     |
-|     | Job Allocation (red)                     |     |
-|     |   Tab: Switch between presets and setting|     |
-|     |  - Presets (orange)                      |     |
-|     |   Down/Up (j/k): Next/Previous preset    |     |
+|     | Job Actions                              |     |
 |     |   ...                                    |     |
 |     --------------------------------------------     |
 |                                                     .|
