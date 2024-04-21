@@ -15,6 +15,7 @@ curl https://sh.rustup.rs -sSf | sh
 cargo install stama
 ```
 The program 'stama' should now be available in your terminal.
+
 3. (Optional): To enable some functions, for example 'cd to working directory of selected job', add the following function to the config file of your shell, e.g. '($HOME)/.bashrc' for bash, or '($HOME)/.zshrc' for zsh:
 ```bash
 stama_wrapper() {
@@ -49,7 +50,7 @@ After restarting your terminal or sourcing the config file, you can use the func
     - ssh to node of selected job (only in stama_wrapper)
 5. **Job allocation:** The job allocation menu can be accessed by pressing 'a' inside stama. The job allocation menu shows a list of saved salloc commands New presets can be created by navigating to the 'create new' entry.
 
-**For more infos see notes.md**
+**For more infos see:** [notes.md](notes.md)
 
 
 # Author
