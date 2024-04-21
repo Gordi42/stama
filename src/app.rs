@@ -379,7 +379,7 @@ impl App {
     }
 
     /// Get the first node in the node list and create a ssh command to it:
-    /// "ssh -Y <node>"
+    /// "ssh <node>"
     /// The command will only be executed in the terminal after closing stama
     /// if a wrapper script is used around stama.
     fn ssh_to_node(&mut self) {
@@ -425,7 +425,7 @@ impl App {
                 let mut node = node_list.split("-").collect::<Vec<&str>>()[0];
                 node = node.split(",").collect::<Vec<&str>>()[0];
                 // create the ssh command
-                let command = format!("ssh -Y {}", node);
+                let command = format!("ssh {}", node);
                 // set the exit command to the ssh command and set the
                 // exit flag to true
                 self.exit_command = Some(command);
