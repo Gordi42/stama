@@ -1,22 +1,16 @@
 # Menu Types:
 
 - Job Overview: top level, showing a list of running jobs
-    - full screen
 - Job Actions: Job actions (kill, etc.)
-    - floating window
 - Options: options for the user
-    - floating window
 - Job Allocation: code-remote like menu for job allocation
-    - floating window
 - Help: help for the user
-    - floating window
 - Confirmation: confirmation dialog
-    - floating window
 - Message: message dialog
-    - floating window
 
 # Job Overview
 ## Layout
+```
                     JOB OVERVIEW
 -- Job list: squeue -U u301533 --------------------------
 | Job ID | Job Name | Status | Time | Partition | Nodes |
@@ -28,6 +22,7 @@
 |                                                       |
 (--------------------------------------------------------
       press 'Ctrl+C' or 'q' for exit, '?' for help
+```
 
 ## Controls
 - Down/Up (j/k): Next/Previous job
@@ -59,6 +54,7 @@ If no log file is specified, show "Job has no log file"
 
 # Job actions menu
 ## Layout
+```
 -- Background ------------------------------------------
 |                                                      |
 |     - Job Actions ------------------------------     |
@@ -71,6 +67,7 @@ If no log file is specified, show "Job has no log file"
 |                                                      |
 (--------------------------------------------------------
       press 'Ctrl+C' or 'q' for exit, '?' for help
+```
 
 ## Controls
 - Down/Up (j/k): Next/Previous action
@@ -89,6 +86,7 @@ Note: If a wrapper script is used, the return string is executed in the shell
 
 # Options
 ## Layout
+```
 -- Background ------------------------------------------
 |                                                      |
 |     - Options ------------------------------         |
@@ -100,6 +98,7 @@ Note: If a wrapper script is used, the return string is executed in the shell
 |                                                      |
 (-------------------------------------------------------
       press 'Ctrl+C' or 'q' for exit, '?' for help
+```
 
 ## Option Types
 - Text: `option: value`
@@ -117,6 +116,7 @@ Note: If a wrapper script is used, the return string is executed in the shell
 
 # Job Allocation
 ## Layout
+```
                     JOG ALLOCATION
 -*Presets:*--------| Settings: ----------------(<tab>)-
 | preset1          | Preset Name:    preset2          |
@@ -128,6 +128,7 @@ Note: If a wrapper script is used, the return string is executed in the shell
 |                  | Other Options:                   |
 (------------------------------------------------------
       press 'Ctrl+C' or 'q' for exit, '?' for help
+```
 
 ## Controls
 - Tab: Switch between presets and settings
@@ -142,6 +143,7 @@ Note: If a wrapper script is used, the return string is executed in the shell
 
 # Help
 ## Layout
+```
 -- Background ------------------------------------------
 |                                                      |
 |     - Help -------------------------------------     |
@@ -154,6 +156,7 @@ Note: If a wrapper script is used, the return string is executed in the shell
 |                                                     .|
 --------------------------------------------------------.
       press 'Ctrl+C' or 'q' for exit, '?' for help
+```
 
 ## Controls
 - Down/Up (j/k): Scroll down/up
@@ -166,6 +169,7 @@ Note: If a wrapper script is used, the return string is executed in the shell
 
 # Confirmation
 ## Layout
+```
 -- Background ------------------------------------------
 |                                                      |
 |     --------------------------------------------    .|
@@ -178,6 +182,7 @@ Note: If a wrapper script is used, the return string is executed in the shell
 |                                                     .|
 --------------------------------------------------------.
       press 'Ctrl+C' or 'q' for exit, '?' for Help
+```
 
 ## Controls
 - Left/Right (h/l): Switch between Yes/No
@@ -188,6 +193,7 @@ Note: If a wrapper script is used, the return string is executed in the shell
 
 # Message
 ## Layout
+```
 -- Background ------------------------------------------
 |                                                      |
 |     - Message ----------------('Esc' to close)--     |
@@ -198,6 +204,7 @@ Note: If a wrapper script is used, the return string is executed in the shell
 |                                                     .|
 --------------------------------------------------------.
       press 'Ctrl+C' or 'q' for exit, '?' for Help
+```
 
 ## Controls
 - Down/Up (j/k): Scroll down/up
