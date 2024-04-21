@@ -1,5 +1,5 @@
 # Slurm Task Manager - stama
-A terminal userinterface for monitoring and managing slurm jobs.
+A terminal user interface for monitoring and managing slurm jobs.
 
 # Content:
 - [Installation](#installation)
