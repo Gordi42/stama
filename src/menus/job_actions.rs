@@ -136,13 +136,13 @@ impl JobActionsMenu {
     pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
         if !self.should_render { return; }
 
-        let window_width = f.size().width;
+        let window_width = f.area().width;
         let text_area_width = (0.8 * (window_width as f32)) as u16;
 
         let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
         let vertical = Layout::vertical([self.labels.len() as u16 + 2])
             .flex(Flex::Center);
-        let [rect] = vertical.areas(f.size());
+        let [rect] = vertical.areas(f.area());
         let [rect] = horizontal.areas(rect);
 
         self.rect = rect;
@@ -154,7 +154,7 @@ impl JobActionsMenu {
         let list = List::new(self.labels.clone())
             .block(Block::default()
                    .borders(Borders::ALL)
-                   .title(block::Title::from(title)
+                   .title_top(Line::from(title)
                           .alignment(Alignment::Center))
                    .border_type(BorderType::Rounded)
                    .style(Style::default().fg(Color::Blue))

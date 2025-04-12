@@ -521,7 +521,7 @@ impl App {
                 ]
                 .as_ref(),
                 )
-            .split(f.size());
+            .split(f.area());
 
         // make a info text at the bottom
         f.render_widget(

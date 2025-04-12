@@ -213,7 +213,7 @@ impl JobOverview {
         let block = Block::default().title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .title(block::Title::from(refresh_rate)
+            .title_top(Line::from(refresh_rate)
                    .alignment(Alignment::Right));
 
         // update the mouse areas
@@ -315,7 +315,7 @@ impl JobOverview {
                 .style(Style::new().bold())
                 )
             .flex(flex) 
-            .highlight_style(Style::new().reversed());
+            .row_highlight_style(Style::new().reversed());
 
         // render the table
         f.render_stateful_widget(table, joblist_area.clone(), &mut self.state);

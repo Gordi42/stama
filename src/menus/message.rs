@@ -79,10 +79,10 @@ impl Message {
                    .borders(Borders::ALL)
                    .title(title)
                    .border_type(BorderType::Rounded)
-                   .title(block::Title::from("<Esc> to close")
+                   .title_top(Line::from("<Esc> to close")
                           .alignment(Alignment::Right)));
 
-        let window_width = f.size().width;
+        let window_width = f.area().width;
         let text_area_width = (0.8 * (window_width as f32)) as u16;
 
         // get the number of lines the text will take
@@ -90,7 +90,7 @@ impl Message {
 
         let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
         let vertical = Layout::vertical([text_lines+2]).flex(Flex::Center);
-        let [rect] = vertical.areas(f.size());
+        let [rect] = vertical.areas(f.area());
         let [rect] = horizontal.areas(rect);
         self.rect = rect;
 

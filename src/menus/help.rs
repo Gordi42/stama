@@ -190,15 +190,15 @@ impl HelpMenu {
     pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
         if !self.should_render { return; }
 
-        let window_width = f.size().width;
+        let window_width = f.area().width;
         let text_area_width = (0.8 * (window_width as f32)) as u16;
 
-        let window_height = f.size().height;
+        let window_height = f.area().height;
         let text_area_height = (1.0 * (window_height as f32)) as u16;
 
         let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
         let vertical = Layout::vertical([text_area_height]).flex(Flex::Center);
-        let [rect] = vertical.areas(f.size());
+        let [rect] = vertical.areas(f.area());
         let [rect] = horizontal.areas(rect);
         self.rect = rect;
 
@@ -207,9 +207,9 @@ impl HelpMenu {
 
         // Render the border
         let block = Block::default()
-            .title(block::Title::from("HELP:")
+            .title_top(Line::from("HELP:")
                    .alignment(Alignment::Left))
-            .title(block::Title::from("<esc> to close")
+            .title_top(Line::from("<esc> to close")
                    .alignment(Alignment::Right))
             .borders(Borders::ALL)
             .border_type(BorderType::Thick)
@@ -231,7 +231,7 @@ impl HelpMenu {
             // check if the category title should be rendered
             if index >= self.offset {
                 let block = Block::default()
-                    .title(block::Title::from(category.title.clone())
+                    .title_top(Line::from(category.title.clone())
                            .alignment(Alignment::Center))
                     .borders(Borders::TOP)
                     .border_style(Style::default().fg(Color::Yellow))

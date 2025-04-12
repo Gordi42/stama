@@ -204,15 +204,15 @@ impl SallocMenu {
             return;
         }
 
-        let window_width = f.size().width;
+        let window_width = f.area().width;
         let text_area_width = (0.8 * (window_width as f32)) as u16;
 
-        let window_height = f.size().height;
+        let window_height = f.area().height;
         let text_area_height = (0.8 * (window_height as f32)) as u16;
 
         let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
         let vertical = Layout::vertical([text_area_height]).flex(Flex::Center);
-        let [rect] = vertical.areas(f.size());
+        let [rect] = vertical.areas(f.area());
         let [rect] = horizontal.areas(rect);
         self.rect = rect;
 
@@ -220,7 +220,7 @@ impl SallocMenu {
         f.render_widget(Clear, rect); //this clears out the background
 
         let block = Block::default()
-            .title(block::Title::from(" SALLOC ").alignment(Alignment::Center))
+            .title_top(Line::from(" SALLOC ").alignment(Alignment::Center))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Blue))
             .title_style(
@@ -272,7 +272,7 @@ impl SallocMenu {
             .block(
                 Block::default()
                     .title("Presets:")
-                    .title(block::Title::from(control_hint)
+                    .title_top(Line::from(control_hint)
                            .alignment(Alignment::Right))
                     .borders(Borders::ALL)
                     .border_style(highlight_style),
@@ -298,7 +298,7 @@ impl SallocMenu {
 
         let block = Block::default()
                     .title("Settings:")
-                    .title(block::Title::from(control_hint)
+                    .title_top(Line::from(control_hint)
                            .alignment(Alignment::Right))
                     .borders(Borders::ALL)
                     .border_style(highlight_style);

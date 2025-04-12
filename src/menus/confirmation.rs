@@ -92,17 +92,17 @@ impl Confirmation {
     pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
         if !self.should_render { return; }
 
-        let window_width = f.size().width;
+        let window_width = f.area().width;
         let mut text_area_width = 40;
         text_area_width = text_area_width.min(window_width as u16);
 
-        let window_height = f.size().height;
+        let window_height = f.area().height;
         let mut text_area_height = 9;
         text_area_height = text_area_height.min(window_height as u16);
 
         let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
         let vertical = Layout::vertical([text_area_height]).flex(Flex::Center);
-        let [rect] = vertical.areas(f.size());
+        let [rect] = vertical.areas(f.area());
         let [rect] = horizontal.areas(rect);
         self.confirm_rect = rect;
 
@@ -113,7 +113,7 @@ impl Confirmation {
         let border = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Thick)
-            .title(block::Title::from("CONFIRM:")
+            .title_top(Line::from("CONFIRM:")
                    .alignment(Alignment::Center))
             .style(Style::default().fg(Color::Blue)
                    .add_modifier(Modifier::BOLD));
