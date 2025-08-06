@@ -1,26 +1,23 @@
 use crossterm::event::{KeyEvent, MouseEvent};
-use ratatui::{Frame, layout::Rect};
+use ratatui::{layout::Rect, Frame};
 
 use crate::app::Action;
+use crate::menus::{
+    confirmation::Confirmation, help::HelpMenu, job_actions::JobActionsMenu,
+    job_overview::JobOverview, message::Message, user_options_menu::UserOptionsMenu,
+};
 use crate::mouse_input::MouseInput;
 use crate::{joblist::JobList, user_options::UserOptions};
-use crate::menus::{
-    confirmation::Confirmation, 
-    help::HelpMenu, 
-    job_actions::JobActionsMenu, 
-    job_overview::JobOverview, 
-    message::Message, 
-    user_options_menu::UserOptionsMenu};
 
 use self::salloc::salloc_menu::SallocMenu;
 
-pub mod job_overview;
-pub mod user_options_menu;
-pub mod help;
-pub mod salloc;
-pub mod job_actions;
-pub mod message;
 pub mod confirmation;
+pub mod help;
+pub mod job_actions;
+pub mod job_overview;
+pub mod message;
+pub mod salloc;
+pub mod user_options_menu;
 
 #[derive(Debug, Clone)]
 pub enum OpenMenu {
@@ -60,8 +57,7 @@ impl MenuContainer {
     /// Construct a new menu container
     pub fn new(user_options: &UserOptions, joblist: &JobList) -> Self {
         Self {
-            job_overview: JobOverview::new(
-                user_options.refresh_rate, &joblist.squeue_command),
+            job_overview: JobOverview::new(user_options.refresh_rate, &joblist.squeue_command),
             job_actions_menu: JobActionsMenu::new(),
             salloc_menu: SallocMenu::new(),
             help_menu: HelpMenu::new(),
@@ -77,7 +73,6 @@ impl MenuContainer {
 // ===================================================================
 
 impl MenuContainer {
-
     /// Opens a selected menu
     pub fn activate_menu(&mut self, open_menu: OpenMenu, joblist: &JobList) {
         match open_menu {
@@ -110,7 +105,7 @@ impl MenuContainer {
 
     /// Opens the job actions menu
     /// This menu shows all the possible actions for the selected job
-    fn open_job_action(&mut self, joblist: &JobList){
+    fn open_job_action(&mut self, joblist: &JobList) {
         match joblist.get_job() {
             Some(job) => {
                 self.job_actions_menu.activate(&job);
@@ -144,8 +139,7 @@ impl MenuContainer {
 
 impl MenuContainer {
     /// Render all menus
-    pub fn render(&mut self, f: &mut Frame, 
-                  area: &Rect, joblist: &JobList) {
+    pub fn render(&mut self, f: &mut Frame, area: &Rect, joblist: &JobList) {
         // render from back to front
         // so that the frontmost menu is rendered last
         self.job_overview.render(f, area, joblist);
@@ -194,10 +188,12 @@ impl MenuContainer {
     }
 
     /// Handle mouse input for all menus
-    pub fn mouse_input(&mut self, 
-                       action: &mut Action,
-                       mouse_input: &mut MouseInput,
-                       mouse_event: MouseEvent) {
+    pub fn mouse_input(
+        &mut self,
+        action: &mut Action,
+        mouse_input: &mut MouseInput,
+        mouse_event: MouseEvent,
+    ) {
         // first update the mouse input with the event
         mouse_input.handled = false;
         mouse_input.event = Some(mouse_event);

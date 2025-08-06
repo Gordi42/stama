@@ -1,21 +1,22 @@
-use std::process::{Command, Stdio};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use ratatui::{
     prelude::{Alignment, Constraint, Direction, Frame, Layout},
     style::{Color, Style},
     widgets::Paragraph,
 };
+use std::process::{Command, Stdio};
 
-use crate::menus::MenuContainer;
-use crate::mouse_input::MouseInput;
-use crate::user_options::UserOptions;
-use crate::menus::{
-    OpenMenu,
-    job_actions::JobActions,
-    message::{Message, MessageKind},
-    confirmation::Confirmation,};
 use crate::job::{Job, JobStatus};
 use crate::joblist::{JobList, JobListAction};
+use crate::menus::MenuContainer;
+use crate::menus::{
+    confirmation::Confirmation,
+    job_actions::JobActions,
+    message::{Message, MessageKind},
+    OpenMenu,
+};
+use crate::mouse_input::MouseInput;
+use crate::user_options::UserOptions;
 
 /// At the end of each tick, the app will handle the action that was set
 /// during the tick. This enum represents the possible actions that can be
@@ -44,9 +45,7 @@ pub enum Action {
     StartSalloc(String),
 }
 
-
-
-/// The main application struct that holds all information and 
+/// The main application struct that holds all information and
 /// states of the application.
 pub struct App {
     /// The current action that should be taken
@@ -60,12 +59,12 @@ pub struct App {
     pub should_redraw: bool,
     /// If true, the application should execute the given command
     pub should_execute_command: bool,
-    /// To open vim, tui must be closed. Hence they must be handled in 
+    /// To open vim, tui must be closed. Hence they must be handled in
     /// the main loop
     pub open_vim: bool,
     /// The path to the file that should be opened in vim
     vim_path: Option<String>,
-    // This command will be written to a given file (for execution after 
+    // This command will be written to a given file (for execution after
     // closing stama)
     pub exit_command: Option<String>,
     /// A buffer for a command
@@ -91,7 +90,7 @@ impl App {
         // create the joblist
         let mut joblist = JobList::new();
         // start the main joblist thread to update the jobs
-        joblist.update_jobs(&user_options); 
+        joblist.update_jobs(&user_options);
         let menus = MenuContainer::new(&user_options, &joblist);
         // create the app
         Self {
@@ -120,8 +119,8 @@ impl App {
     /// Handles the action that was set during the tick
     pub fn handle_action(&mut self) {
         match &self.action {
-            Action::Quit => { 
-                self.quit(); 
+            Action::Quit => {
+                self.quit();
             }
             Action::ConfirmedQuit => {
                 self.confirmed_quit();
@@ -154,13 +153,12 @@ impl App {
         self.action = Action::None;
     }
 
-    /// Either opens a confirmation dialog to quit the application 
-    /// or quits the application directly if the user options are set 
+    /// Either opens a confirmation dialog to quit the application
+    /// or quits the application directly if the user options are set
     /// to not confirm
     pub fn quit(&mut self) {
         if self.user_options.confirm_before_quit {
-            self.menus.confirmation = Confirmation::new(
-                "Quit?", Action::ConfirmedQuit);
+            self.menus.confirmation = Confirmation::new("Quit?", Action::ConfirmedQuit);
         } else {
             self.should_quit = true;
         }
@@ -170,7 +168,6 @@ impl App {
     fn confirmed_quit(&mut self) {
         self.should_quit = true;
     }
-
 
     /// Updates the user options from the user options menu
     fn update_user_options(&mut self) {
@@ -212,13 +209,11 @@ impl App {
     /// Open remove salloc entry dialog
     fn open_remove_salloc_entry_dialog(&mut self) {
         self.menus.confirmation = Confirmation::new(
-            "Are your sure you want to remove the entry?", 
-            Action::RemoveSallocEntry);
+            "Are your sure you want to remove the entry?",
+            Action::RemoveSallocEntry,
+        );
     }
-
-
 }
-
 
 // ===================================================================
 // JOB ACTIONS FUNCTIONS
@@ -231,8 +226,9 @@ impl App {
             let job_name = job.get_jobname();
             let msg = format!("Kill job {} ({})?", job_name, job.id);
             self.menus.confirmation = Confirmation::new(
-                &msg, Action::JobOption(
-                    JobActions::KillConfirmed(job.clone())));
+                &msg,
+                Action::JobOption(JobActions::KillConfirmed(job.clone())),
+            );
         } else {
             self.kill_job(job);
         }
@@ -243,30 +239,26 @@ impl App {
     /// will be shown.
     fn kill_job(&mut self, job: &Job) {
         // perform the kill command
-        let command_status = Command::new("scancel")
-            .arg(job.id.to_string())
-            .output();
+        let command_status = Command::new("scancel").arg(job.id.to_string()).output();
         // check if the command was successful. This will check if the command
         // could be executed. It will not check if the job was actually killed.
         match command_status {
             Ok(output) => {
-                // Check the exit status of the command. 
+                // Check the exit status of the command.
                 // If it was not successful, show an error message.
                 if !output.status.success() {
                     let error_msg = String::from_utf8_lossy(&output.stderr);
-                    self.open_error_message(
-                        &format!("Error killing job: {}", error_msg));
+                    self.open_error_message(&format!("Error killing job: {}", error_msg));
                 }
             }
             Err(e) => {
                 // If the command could not be executed, show an error message.
-                self.open_error_message(
-                    &format!("Error killing job: {}", e));
+                self.open_error_message(&format!("Error killing job: {}", e));
             }
         }
     }
 
-    /// Opens the log file of the selected job in vim (or the 
+    /// Opens the log file of the selected job in vim (or the
     /// user defined editor)
     /// If no log file is found, an error message will be shown.
     fn open_log(&mut self) {
@@ -292,7 +284,7 @@ impl App {
         self.open_vim = true;
     }
 
-    /// Opens the submission script of the selected job in vim (or the 
+    /// Opens the submission script of the selected job in vim (or the
     /// user defined editor)
     fn open_submissions(&mut self) {
         let job = match self.joblist.get_job() {
@@ -307,7 +299,7 @@ impl App {
             self.open_error_message("No submission script found");
             return;
         }
-        // if the job command is empty (only whitespace), 
+        // if the job command is empty (only whitespace),
         // show an error message
         if job.command.trim().is_empty() {
             self.open_error_message("No submission script found");
@@ -336,7 +328,6 @@ impl App {
         let editor = self.user_options.external_editor.as_str();
         match &self.vim_path {
             Some(path) => {
-
                 let mut parts = editor.trim().split_whitespace();
                 let program = parts.next().unwrap_or(" ");
                 let args: Vec<&str> = parts.collect();
@@ -347,7 +338,8 @@ impl App {
                     .stdin(Stdio::inherit())
                     .stdout(Stdio::inherit())
                     .stderr(Stdio::inherit())
-                    .spawn().expect("Failed to execute command");
+                    .spawn()
+                    .expect("Failed to execute command");
 
                 // Wait for the process to finish
                 child.wait().expect("Failed to wait on child");
@@ -392,7 +384,7 @@ impl App {
                 return;
             }
         };
-        // check if the job is running 
+        // check if the job is running
         // if not, there will be no node to ssh to
         if job.status != JobStatus::Running {
             // print an error message if the job is not running
@@ -412,8 +404,7 @@ impl App {
                 if !output.status.success() {
                     // print an error message if the command was not successful
                     let error_msg = String::from_utf8_lossy(&output.stderr);
-                    self.open_error_message(
-                        &format!("Error getting node list: {}", error_msg));
+                    self.open_error_message(&format!("Error getting node list: {}", error_msg));
                     return;
                 }
                 // format the node list such that only the first node is taken
@@ -434,8 +425,7 @@ impl App {
             Err(e) => {
                 // print an error message if the squeue command to get the
                 // node list could not be executed
-                self.open_error_message(
-                    &format!("Error getting node list: {}", e));
+                self.open_error_message(&format!("Error getting node list: {}", e));
             }
         }
     }
@@ -456,8 +446,10 @@ impl App {
 
         // open a error dialog if the command could not be executed
         if output_status.is_err() {
-            let msg = format!("Error starting salloc command: {}", 
-                              output_status.err().unwrap());
+            let msg = format!(
+                "Error starting salloc command: {}",
+                output_status.err().unwrap()
+            );
             self.open_error_message(&msg);
         } else {
             let mut child = output_status.unwrap();
@@ -486,7 +478,7 @@ impl App {
             KeyCode::Char('c') | KeyCode::Char('C') => {
                 if key_event.modifiers == KeyModifiers::CONTROL {
                     self.quit();
-                    return
+                    return;
                 }
             }
             _ => {}
@@ -500,40 +492,28 @@ impl App {
 
     /// Handles mouse input
     pub fn mouse_input(&mut self, mouse_event: MouseEvent) {
-        self.menus.mouse_input(
-            &mut self.action,
-            &mut self.mouse_input,
-            mouse_event,
-            );
+        self.menus
+            .mouse_input(&mut self.action, &mut self.mouse_input, mouse_event);
 
         self.handle_action();
     }
 
     /// Render the UI
     pub fn render(&mut self, f: &mut Frame) {
-
         let outer_layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(
-                [
-                Constraint::Min(3),
-                Constraint::Length(1),
-                ]
-                .as_ref(),
-                )
+            .constraints([Constraint::Min(3), Constraint::Length(1)].as_ref())
             .split(f.area());
 
         // make a info text at the bottom
         f.render_widget(
             Paragraph::new("Press `Ctrl-C` or `q` for exit, `?` for help")
-            .style(Style::default().fg(Color::LightCyan))
-            .alignment(Alignment::Center),
+                .style(Style::default().fg(Color::LightCyan))
+                .alignment(Alignment::Center),
             outer_layout[1],
-            );
+        );
 
         // render the windows
         self.menus.render(f, &outer_layout[0], &self.joblist);
-
     }
-        
 }

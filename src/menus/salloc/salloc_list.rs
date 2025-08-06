@@ -1,5 +1,5 @@
 use color_eyre::eyre;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// The directory where the config files are saved
 /// full path: $HOME/{CONFIG_DIR}
@@ -9,7 +9,7 @@ const CONFIG_DIR: &str = ".config/stama";
 /// full path: $HOME/{CONFIG_DIR}/{FILENAME}
 const FILENAME: &str = "salloc_list.toml";
 
-/// A list of salloc entries that can be saved and loaded 
+/// A list of salloc entries that can be saved and loaded
 /// from a TOML file
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct SallocList<T> {
@@ -35,13 +35,17 @@ impl<T: Serialize> SallocList<T> {
     }
 
     pub fn get(&self, index: usize) -> eyre::Result<&T> {
-        let entry = self.entries.get(index)
+        let entry = self
+            .entries
+            .get(index)
             .ok_or_else(|| eyre::eyre!("Index out of bounds."))?;
         Ok(entry)
     }
 
     pub fn get_mut(&mut self, index: usize) -> eyre::Result<&mut T> {
-        let entry = self.entries.get_mut(index)
+        let entry = self
+            .entries
+            .get_mut(index)
             .ok_or_else(|| eyre::eyre!("Index out of bounds."))?;
         Ok(entry)
     }
@@ -73,8 +77,10 @@ impl<T: Serialize> SallocList<T> {
         Ok(())
     }
 
-    pub fn load(filename: Option<&str>) -> eyre::Result<SallocList<T>> 
-    where for<'de> T: Deserialize<'de> {
+    pub fn load(filename: Option<&str>) -> eyre::Result<SallocList<T>>
+    where
+        for<'de> T: Deserialize<'de>,
+    {
         let home = std::env::var("HOME")?;
         let file = match filename {
             Some(name) => format!("{}/{}/{}", home, CONFIG_DIR, name),
@@ -141,7 +147,7 @@ mod tests {
         list.save(Some("test_load.toml")).unwrap();
 
         // Load the list
-        let loaded_list: SallocList<SallocEntry> = 
+        let loaded_list: SallocList<SallocEntry> =
             SallocList::load(Some("test_load.toml")).unwrap();
 
         // Test the loaded list

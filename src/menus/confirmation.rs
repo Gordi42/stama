@@ -1,15 +1,13 @@
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
+    layout::{Flex, Layout},
     prelude::*,
     style::{Color, Style},
     widgets::*,
-    layout::{Layout, Flex,},
 };
-use crossterm::event::{
-    KeyCode, KeyEvent, MouseButton, MouseEventKind};
 
 use crate::app::Action;
 use crate::mouse_input::MouseInput;
-
 
 pub struct Confirmation {
     pub should_render: bool,
@@ -83,14 +81,15 @@ impl Confirmation {
     }
 }
 
-
 // ====================================================================
 //  RENDERING
 // ====================================================================
 
 impl Confirmation {
     pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
-        if !self.should_render { return; }
+        if !self.should_render {
+            return;
+        }
 
         let window_width = f.area().width;
         let mut text_area_width = 40;
@@ -113,18 +112,22 @@ impl Confirmation {
         let border = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Thick)
-            .title_top(Line::from("CONFIRM:")
-                   .alignment(Alignment::Center))
-            .style(Style::default().fg(Color::Blue)
-                   .add_modifier(Modifier::BOLD));
+            .title_top(Line::from("CONFIRM:").alignment(Alignment::Center))
+            .style(
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            );
 
         f.render_widget(border.clone(), rect);
 
         let outer_layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1),
-                          Constraint::Min(1),
-                          Constraint::Length(3)])
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(3),
+            ])
             .split(border.inner(rect));
 
         let text = Paragraph::new(self.message.clone())
@@ -136,46 +139,56 @@ impl Confirmation {
 
         let buttons_layout = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(0),
-                          Constraint::Length(11),
-                          Constraint::Length(3),
-                          Constraint::Length(10),
-                            Constraint::Min(0)])
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(11),
+                Constraint::Length(3),
+                Constraint::Length(10),
+                Constraint::Min(0),
+            ])
             .split(outer_layout[2]);
 
         self.yes_rect = buttons_layout[1];
         self.no_rect = buttons_layout[3];
-        
+
         let mut yes_button = Paragraph::new("Yes")
             .style(Style::default().fg(Color::White))
             .alignment(Alignment::Center)
-            .block(Block::default()
-                   .borders(Borders::ALL)
-                   .border_type(BorderType::Rounded));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            );
 
         if self.select_yes {
-            yes_button = yes_button.style(Style::default().fg(Color::Blue)
-                                         .add_modifier(Modifier::BOLD))
+            yes_button = yes_button.style(
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            )
         }
 
         let mut no_button = Paragraph::new("No")
             .style(Style::default().fg(Color::White))
             .alignment(Alignment::Center)
-            .block(Block::default()
-                   .borders(Borders::ALL)
-                   .border_type(BorderType::Rounded));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            );
 
         if !self.select_yes {
-            no_button = no_button.style(Style::default().fg(Color::Blue)
-                                         .add_modifier(Modifier::BOLD))
+            no_button = no_button.style(
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            )
         }
 
         f.render_widget(yes_button, buttons_layout[1]);
         f.render_widget(no_button, buttons_layout[3]);
-
     }
 }
-
 
 // ====================================================================
 //  USER INPUT
@@ -185,7 +198,9 @@ impl Confirmation {
     /// Handle user input for the message window
     /// Always returns true (input is always handled)
     pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
-        if !self.handle_input { return false; }
+        if !self.handle_input {
+            return false;
+        }
 
         match key_event.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('n') => {
@@ -197,10 +212,15 @@ impl Confirmation {
             KeyCode::Char(' ') | KeyCode::Enter => {
                 self.select(action);
             }
-            KeyCode::Down | KeyCode::Up | KeyCode::Left | KeyCode::Right | 
-                KeyCode::Tab |
-                KeyCode::Char('h') | KeyCode::Char('j') | 
-                KeyCode::Char('k') | KeyCode::Char('l') => {
+            KeyCode::Down
+            | KeyCode::Up
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Tab
+            | KeyCode::Char('h')
+            | KeyCode::Char('j')
+            | KeyCode::Char('k')
+            | KeyCode::Char('l') => {
                 self.toggle();
             }
             _ => {}
@@ -209,19 +229,17 @@ impl Confirmation {
     }
 }
 
-
 // ====================================================================
 //  MOUSE INPUT
 // ====================================================================
 
 impl Confirmation {
-    pub fn mouse_input(&mut self, 
-                       action: &mut Action, 
-                       mouse_input: &mut MouseInput) {
-        if !self.handle_input { return;}
+    pub fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
+        if !self.handle_input {
+            return;
+        }
 
         if let Some(mouse_event_kind) = mouse_input.kind() {
-
             match mouse_event_kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     if !self.confirm_rect.contains(mouse_input.get_position()) {

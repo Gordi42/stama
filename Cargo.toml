@@ -1,6 +1,6 @@
 [package]
 name = "stama"
-version = "1.0.0"
+version = "1.0.2"
 edition = "2021"
 authors = ["Silvano Gordian Rosenau <silvano.rosenau@uni-hamburg.de>"]
 description = "A terminal user interface for monitoring and managing slurm jobs."

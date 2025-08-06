@@ -1,10 +1,9 @@
-use tui_textarea::{TextArea, CursorMove};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     prelude::*,
     style::{Color, Style},
 };
-use crossterm::event::{
-    KeyCode, KeyEvent};
+use tui_textarea::{CursorMove, TextArea};
 
 use crate::app::Action;
 
@@ -13,7 +12,6 @@ pub enum TextFieldType {
     Integer(usize),
     Boolean(bool),
 }
-
 
 /// Text field entry that can be edited
 ///
@@ -55,14 +53,14 @@ impl TextField {
             TextFieldType::Boolean(_) => {
                 let b = string_to_bool(lines.as_str());
                 self.field_type = TextFieldType::Boolean(b);
-            },
+            }
             TextFieldType::Integer(_) => {
                 let u = lines.parse::<usize>().unwrap_or(0);
                 self.field_type = TextFieldType::Integer(u);
-            },
+            }
             TextFieldType::Text(_) => {
                 self.field_type = TextFieldType::Text(lines);
-            },
+            }
         }
     }
 
@@ -81,13 +79,13 @@ impl TextField {
             TextFieldType::Boolean(old_value) => {
                 self.field_type = TextFieldType::Boolean(!old_value);
                 self.sync_v2t();
-            },
+            }
             TextFieldType::Integer(_) => {
                 self.active = true;
-            },
+            }
             TextFieldType::Text(_) => {
                 self.active = true;
-            },
+            }
         }
     }
 
@@ -102,7 +100,7 @@ impl TextField {
             TextFieldType::Integer(_) => {
                 let lines = self.text_area.lines().join("\n");
                 !lines.parse::<usize>().is_err()
-            },
+            }
             _ => true,
         };
         if is_valid {
@@ -137,9 +135,11 @@ impl TextField {
     pub fn render(&mut self, f: &mut Frame, area: &Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), 
-                         Constraint::Length(1),
-                         Constraint::Percentage(50)])
+            .constraints([
+                Constraint::Percentage(50),
+                Constraint::Length(1),
+                Constraint::Percentage(50),
+            ])
             .split(*area);
 
         // first render the label
@@ -150,19 +150,24 @@ impl TextField {
 
         if self.focused {
             line = line.style(
-                Style::default().bg(Color::Blue)
-                .fg(Color::Black).add_modifier(Modifier::BOLD));
+                Style::default()
+                    .bg(Color::Blue)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD),
+            );
         };
 
         f.render_widget(line, chunks[0]);
 
         // render the middle part
-        let mut line = Line::from(" ")
-            .style(Style::default());
+        let mut line = Line::from(" ").style(Style::default());
         if self.focused && !self.active {
             line = line.style(
-                Style::default().bg(Color::Blue)
-                .fg(Color::Black).add_modifier(Modifier::BOLD));
+                Style::default()
+                    .bg(Color::Blue)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD),
+            );
         };
         f.render_widget(line, chunks[1]);
 
@@ -172,19 +177,24 @@ impl TextField {
         self.text_area.set_style(Style::default());
 
         if self.focused && self.active {
-            self.text_area.set_cursor_style(Style::default().bg(Color::Blue));
+            self.text_area
+                .set_cursor_style(Style::default().bg(Color::Blue));
             self.text_area.set_cursor_line_style(
-                Style::default().fg(Color::Blue)
-                .add_modifier(Modifier::BOLD));
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            );
         } else if self.focused && !self.active {
             self.text_area.set_style(
-                Style::default().bg(Color::Blue).fg(Color::Black)
-                .add_modifier(Modifier::BOLD));
+                Style::default()
+                    .bg(Color::Blue)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD),
+            );
         } else {
         }
 
         f.render_widget(self.text_area.widget(), chunks[2]);
-
     }
 }
 
@@ -196,15 +206,14 @@ impl TextField {
     /// Handle user input for the user settings window
     /// Always returns true (input is always handled)
     pub fn input(&mut self, key_event: KeyEvent, action: &mut Action) -> bool {
-
         match key_event.code {
             KeyCode::Esc => {
                 self.reset();
-            },
+            }
             KeyCode::Enter => {
                 self.apply();
                 *action = Action::UpdateUserOptions;
-            },
+            }
             _ => {
                 self.text_area.input(key_event);
             }

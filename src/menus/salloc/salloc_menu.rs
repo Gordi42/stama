@@ -10,8 +10,8 @@ use crate::{app::Action, mouse_input::MouseInput};
 
 use crate::menus::OpenMenu;
 
-use super::{entry_menu::EntryMenu, salloc_entry::SallocEntry};
 use super::salloc_list::SallocList;
+use super::{entry_menu::EntryMenu, salloc_entry::SallocEntry};
 
 /// Which part of the menu is in focus
 pub enum Focus {
@@ -27,10 +27,10 @@ pub struct SallocMenu {
     handle_input: bool,
     /// The rectangle where to render the menu (for mouse input)
     rect: Rect,
-    /// The presets pane: 
+    /// The presets pane:
     /// Rectangle where the presets list is rendered
     preset_pane: Rect,
-    /// The settings pane: 
+    /// The settings pane:
     /// Rectangle where the settings list is rendered
     settings_pane: Rect,
     /// The list of salloc entries
@@ -49,8 +49,7 @@ pub struct SallocMenu {
 
 impl SallocMenu {
     pub fn new() -> SallocMenu {
-        let salloc_list = SallocList::load(None)
-            .unwrap_or_else(|_| SallocList::new());
+        let salloc_list = SallocList::load(None).unwrap_or_else(|_| SallocList::new());
         let mut salloc_menu = SallocMenu {
             should_render: false,
             handle_input: false,
@@ -143,7 +142,7 @@ impl SallocMenu {
     fn get_salloc_entry(&self) -> Option<&SallocEntry> {
         let index = match self.state.selected() {
             Some(ind) => ind,
-            None => return None
+            None => return None,
         };
         self.salloc_list.entries.get(index)
     }
@@ -157,7 +156,7 @@ impl SallocMenu {
     fn set_entry(&mut self, entry: SallocEntry) {
         let index = match self.state.selected() {
             Some(ind) => ind,
-            None => return
+            None => return,
         };
         self.salloc_list.entries[index] = entry;
     }
@@ -182,7 +181,7 @@ impl SallocMenu {
     pub fn delete_current_entry(&mut self) {
         let index = match self.state.selected() {
             Some(ind) => ind,
-            None => return
+            None => return,
         };
         if index == self.salloc_list.len() {
             return;
@@ -264,22 +263,19 @@ impl SallocMenu {
         };
         let control_hint = match self.focus {
             Focus::List => "",
-            Focus::Entry => "<tab>"
+            Focus::Entry => "<tab>",
         };
-
 
         let list = List::new(items)
             .block(
                 Block::default()
                     .title("Presets:")
-                    .title_top(Line::from(control_hint)
-                           .alignment(Alignment::Right))
+                    .title_top(Line::from(control_hint).alignment(Alignment::Right))
                     .borders(Borders::ALL)
                     .border_style(highlight_style),
             )
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
             .highlight_style(highlight_style.reversed());
-
 
         f.render_stateful_widget(list, *area, &mut self.state);
     }
@@ -293,22 +289,18 @@ impl SallocMenu {
         };
         let control_hint = match self.focus {
             Focus::List => "<tab>",
-            Focus::Entry => ""
+            Focus::Entry => "",
         };
 
         let block = Block::default()
-                    .title("Settings:")
-                    .title_top(Line::from(control_hint)
-                           .alignment(Alignment::Right))
-                    .borders(Borders::ALL)
-                    .border_style(highlight_style);
+            .title("Settings:")
+            .title_top(Line::from(control_hint).alignment(Alignment::Right))
+            .borders(Borders::ALL)
+            .border_style(highlight_style);
 
         f.render_widget(block.clone(), *area);
         self.entry_menu.render(f, &block.inner(*area));
-
-
     }
-
 }
 
 // ====================================================================
@@ -322,11 +314,11 @@ impl SallocMenu {
         if !self.handle_input {
             return false;
         }
-        
+
         match key_event.code {
             KeyCode::Tab => {
                 self.toggle_focus();
-                return true
+                return true;
             }
             _ => {}
         }
@@ -397,7 +389,6 @@ impl SallocMenu {
 
         true
     }
-
 }
 
 // ====================================================================
@@ -440,9 +431,7 @@ impl SallocMenu {
     }
 
     /// Handle mouse input for the list window
-    fn mouse_input_list(&mut self, action: &mut Action,
-                        mouse_input: &mut MouseInput) {
-
+    fn mouse_input_list(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
         if let Some(mouse_event_kind) = mouse_input.kind() {
             match mouse_event_kind {
                 // clicking

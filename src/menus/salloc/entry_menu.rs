@@ -1,18 +1,11 @@
-use ratatui::{
-    prelude::*,
-    widgets::*,
-    layout::Layout,
-};
-use crossterm::event::{
-    KeyCode, KeyEvent, MouseButton, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
+use ratatui::{layout::Layout, prelude::*, widgets::*};
 
+use crate::app::Action;
 use crate::mouse_input::MouseInput;
 use crate::text_field::{TextField, TextFieldType};
-use crate::app::Action;
 
 use super::salloc_entry::SallocEntry;
-
-
 
 pub struct EntryMenu {
     pub is_active: bool,
@@ -26,7 +19,6 @@ pub struct EntryMenu {
     pub rects: Vec<Rect>,
 }
 
-
 // ====================================================================
 //  CONSTRUCTOR
 // ====================================================================
@@ -38,7 +30,7 @@ impl EntryMenu {
             Some(entry) => {
                 is_new = false;
                 entry.clone()
-            },
+            }
             None => {
                 is_new = true;
                 SallocEntry::new()
@@ -46,30 +38,14 @@ impl EntryMenu {
         };
 
         let mut entries = vec![
-            TextField::new(
-                "Preset Name", 
-                TextFieldType::Text(entry.preset_name)),
-            TextField::new(
-                "Account", 
-                TextFieldType::Text(entry.account)),
-            TextField::new(
-                "Partition", 
-                TextFieldType::Text(entry.partition)),
-            TextField::new(
-                "Nodes", 
-                TextFieldType::Text(entry.nodes)),
-            TextField::new(
-                "Tasks per Node", 
-                TextFieldType::Text(entry.cpus_per_node)),
-            TextField::new(
-                "Memory", 
-                TextFieldType::Text(entry.memory)),
-            TextField::new(
-                "Time Limit", 
-                TextFieldType::Text(entry.time_limit)),
-            TextField::new(
-                "Other Options", 
-                TextFieldType::Text(entry.other_options)),
+            TextField::new("Preset Name", TextFieldType::Text(entry.preset_name)),
+            TextField::new("Account", TextFieldType::Text(entry.account)),
+            TextField::new("Partition", TextFieldType::Text(entry.partition)),
+            TextField::new("Nodes", TextFieldType::Text(entry.nodes)),
+            TextField::new("Tasks per Node", TextFieldType::Text(entry.cpus_per_node)),
+            TextField::new("Memory", TextFieldType::Text(entry.memory)),
+            TextField::new("Time Limit", TextFieldType::Text(entry.time_limit)),
+            TextField::new("Other Options", TextFieldType::Text(entry.other_options)),
         ];
 
         entries[0].focused = true;
@@ -102,7 +78,7 @@ impl EntryMenu {
             new_index = 0;
         } else if index < 0 {
             new_index = max_ind;
-        } 
+        }
         self.index = new_index;
         self.set_focus(self.index as usize, true);
         self.state.select(Some(self.index as usize));
@@ -166,7 +142,6 @@ impl EntryMenu {
     }
 }
 
-
 // ====================================================================
 //  RENDERING
 // ====================================================================
@@ -192,7 +167,8 @@ impl EntryMenu {
             num_rows = self.max_height as usize;
         }
         let constraints = (0..num_rows)
-            .map(|_| Constraint::Length(1)).collect::<Vec<_>>();
+            .map(|_| Constraint::Length(1))
+            .collect::<Vec<_>>();
         let rects = Layout::default()
             .direction(Direction::Vertical)
             .constraints(constraints)
@@ -202,8 +178,6 @@ impl EntryMenu {
         for (rect, entry) in rects.iter().zip(&mut self.entries[self.offset as usize..]) {
             entry.render(f, rect);
         }
-
-
     }
 }
 
@@ -230,15 +204,15 @@ impl EntryMenu {
             KeyCode::Down | KeyCode::Char('j') => {
                 self.next();
                 return true;
-            },
+            }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.previous();
                 return true;
-            },
+            }
             KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char(' ') => {
                 self.entries[self.index as usize].on_enter();
                 return true;
-            },
+            }
             _ => {}
         }
         false
@@ -271,7 +245,6 @@ impl EntryMenu {
                             return;
                         }
                     }
-                
                 }
                 // scrolling
                 MouseEventKind::ScrollUp => {

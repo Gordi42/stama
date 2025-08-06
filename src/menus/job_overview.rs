@@ -1,19 +1,17 @@
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
+    layout::Flex,
     prelude::*,
     style::{Color, Style},
     widgets::*,
-    layout::Flex,
 };
-use crossterm::event::{
-    KeyCode, KeyEvent, MouseEventKind, MouseButton,};
-use tui_textarea::{TextArea, CursorMove};
+use tui_textarea::{CursorMove, TextArea};
 
-use crate::menus::OpenMenu;
 use crate::app::Action;
 use crate::job::{Job, JobStatus};
-use crate::mouse_input::MouseInput;
 use crate::joblist::{JobList, JobListAction, SortCategory};
-
+use crate::menus::OpenMenu;
+use crate::mouse_input::MouseInput;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowFocus {
@@ -33,17 +31,17 @@ pub struct MouseAreas {
 }
 
 pub struct JobOverview {
-    pub should_render: bool,  // if the window should render
-    pub handle_input: bool,   // if the window should handle input
-    pub collapsed_top: bool,  // if the job list is collapsed
-    pub collapsed_bot: bool,  // if the job details are collapsed
-    pub focus: WindowFocus,   // which part of the window is in focus
-    pub state: TableState,     // the state of the job list
-    pub mouse_areas: MouseAreas, // the mouse areas of the window
+    pub should_render: bool,               // if the window should render
+    pub handle_input: bool,                // if the window should handle input
+    pub collapsed_top: bool,               // if the job list is collapsed
+    pub collapsed_bot: bool,               // if the job details are collapsed
+    pub focus: WindowFocus,                // which part of the window is in focus
+    pub state: TableState,                 // the state of the job list
+    pub mouse_areas: MouseAreas,           // the mouse areas of the window
     pub squeue_command: TextArea<'static>, // the squeue command
-    pub edit_squeue: bool,    // if the squeue command is being edited
-    pub refresh_rate: usize,  // the refresh rate of the window
-    pub log_height: u16,      // the height of the log section
+    pub edit_squeue: bool,                 // if the squeue command is being edited
+    pub refresh_rate: usize,               // the refresh rate of the window
+    pub log_height: u16,                   // the height of the log section
 }
 
 // ====================================================================
@@ -51,7 +49,7 @@ pub struct JobOverview {
 // ====================================================================
 
 impl JobOverview {
-    pub fn new(refresh_rate: usize, squeue_command: &str,) -> Self {
+    pub fn new(refresh_rate: usize, squeue_command: &str) -> Self {
         let mut state = TableState::default();
         state.select(Some(0));
         // create mouse areas with 6 categories
@@ -89,12 +87,10 @@ impl JobOverview {
 
     fn exit_squeue_edit(&mut self, action: &mut Action) {
         let new_command = self.get_squeue_command();
-        *action = Action::UpdateJobList(
-            JobListAction::UpdateSqueueCommand(new_command));
+        *action = Action::UpdateJobList(JobListAction::UpdateSqueueCommand(new_command));
         self.edit_squeue = false;
     }
 }
-
 
 // ====================================================================
 //  RENDERING
@@ -103,7 +99,9 @@ impl JobOverview {
 impl JobOverview {
     pub fn render(&mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
         // only render if the window is active
-        if !self.should_render { return; }
+        if !self.should_render {
+            return;
+        }
 
         let mut constraints = vec![Constraint::Length(1)];
         if self.collapsed_top && self.collapsed_bot {
@@ -154,8 +152,7 @@ impl JobOverview {
         }
     }
 
-    fn render_joblist_collapsed(
-        &mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
+    fn render_joblist_collapsed(&mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
         // update the mouse areas
         self.mouse_areas.joblist_title = area.clone();
         self.mouse_areas.joblist = Rect::default();
@@ -166,7 +163,7 @@ impl JobOverview {
                 let title = format!("▶ Job list (collapsed)");
                 f.render_widget(Line::from(title), *area);
                 return;
-            },
+            }
         };
 
         let col = get_job_color(job);
@@ -181,7 +178,8 @@ impl JobOverview {
             job.nodes.to_string(),
         ];
 
-        let constraints = content_strings.iter()
+        let constraints = content_strings
+            .iter()
             .map(|s| Constraint::Min(s.len() as u16 + 2))
             .collect::<Vec<Constraint>>();
 
@@ -189,32 +187,29 @@ impl JobOverview {
             .direction(Direction::Horizontal)
             .constraints::<Vec<Constraint>>(constraints)
             .split(*area);
-        
+
         // update the mouse areas of the categories
         for category in self.mouse_areas.categories.iter_mut() {
             *category = Rect::default();
         }
 
         content_strings.iter().enumerate().for_each(|(i, s)| {
-            let line = Line::from(s.clone()).
-                style(Style::default().fg(col));
+            let line = Line::from(s.clone()).style(Style::default().fg(col));
             f.render_widget(line, layout[i]);
         });
     }
 
-    fn render_joblist_extended(
-        &mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
+    fn render_joblist_extended(&mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
         let title = "▼ Job list: ";
         let title_len = title.len() as u16;
 
-        let refresh_rate = format!(
-            "{} ms", self.refresh_rate);
-        
-        let block = Block::default().title(title)
+        let refresh_rate = format!("{} ms", self.refresh_rate);
+
+        let block = Block::default()
+            .title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .title_top(Line::from(refresh_rate)
-                   .alignment(Alignment::Right));
+            .title_top(Line::from(refresh_rate).alignment(Alignment::Right));
 
         // update the mouse areas
         let mut top_row = area.clone();
@@ -224,7 +219,6 @@ impl JobOverview {
         let mut joblist_area = block.inner(*area).clone();
 
         f.render_widget(block.clone(), *area);
-
 
         // render the squeue command
         let buffer = self.get_squeue_command();
@@ -244,12 +238,14 @@ impl JobOverview {
         // ----------------------------------------------
 
         // Create the titles for the columns
-        let mut title_names = vec![Span::raw("ID"), 
-                                   Span::raw("Name"), 
-                                   Span::raw("Status"), 
-                                   Span::raw("Time"), 
-                                   Span::raw("Partition"), 
-                                   Span::raw("Nodes")];
+        let mut title_names = vec![
+            Span::raw("ID"),
+            Span::raw("Name"),
+            Span::raw("Status"),
+            Span::raw("Time"),
+            Span::raw("Partition"),
+            Span::raw("Nodes"),
+        ];
         // modify the title names if the category is selected
         let cat_ind = match jobs.get_sort_category() {
             SortCategory::Id => 0,
@@ -260,23 +256,29 @@ impl JobOverview {
             SortCategory::Nodes => 5,
         };
         let title_string: String = title_names[cat_ind].content.clone().into();
-        let new_title = format!("{} {}", 
-                           title_string,
-                           if jobs.is_reverse() { "▲" } else { "▼" });
-        title_names[cat_ind] = Span::styled(
-            new_title, Style::default().fg(Color::Blue));
+        let new_title = format!(
+            "{} {}",
+            title_string,
+            if jobs.is_reverse() { "▲" } else { "▼" }
+        );
+        title_names[cat_ind] = Span::styled(new_title, Style::default().fg(Color::Blue));
 
         // Create the rows for the job list
-        let rows = jobs.jobs.iter().map(|job| {
-            Row::new(vec![
-                job.id.clone(),
-                job.name.clone(),
-                job.status.to_string(),
-                format_time(job),
-                job.partition.clone(),
-                job.nodes.to_string(),
-            ]).style(Style::default().fg(get_job_color(job)))
-        }).collect::<Vec<Row>>();
+        let rows = jobs
+            .jobs
+            .iter()
+            .map(|job| {
+                Row::new(vec![
+                    job.id.clone(),
+                    job.name.clone(),
+                    job.status.to_string(),
+                    format_time(job),
+                    job.partition.clone(),
+                    job.nodes.to_string(),
+                ])
+                .style(Style::default().fg(get_job_color(job)))
+            })
+            .collect::<Vec<Row>>();
 
         // Create the widths for the columns
         let widths = [
@@ -299,33 +301,32 @@ impl JobOverview {
             .spacing(column_spacing)
             .split(joblist_area);
         // set height of each rect to 1
-        rects = rects.iter().map(|rect| {
-            let mut r = rect.clone();
-            r.height = 1;
-            r
-        }).collect();
+        rects = rects
+            .iter()
+            .map(|rect| {
+                let mut r = rect.clone();
+                r.height = 1;
+                r
+            })
+            .collect();
         self.mouse_areas.categories = rects.to_vec();
 
         // create the table
 
         let table = Table::new(rows, widths)
             .column_spacing(column_spacing)
-            .header(
-                Row::new(title_names)
-                .style(Style::new().bold())
-                )
-            .flex(flex) 
+            .header(Row::new(title_names).style(Style::new().bold()))
+            .flex(flex)
             .row_highlight_style(Style::new().reversed());
 
         // render the table
         f.render_stateful_widget(table, joblist_area.clone(), &mut self.state);
 
         // update the mouse areas
-        joblist_area.y += 1;       // remove the header row
+        joblist_area.y += 1; // remove the header row
         joblist_area.height = joblist_area.height.saturating_sub(1);
         self.mouse_areas.joblist = joblist_area;
         return;
-
     }
 
     fn render_squeue_command(&mut self, f: &mut Frame, area: &Rect) {
@@ -333,8 +334,8 @@ impl JobOverview {
         if self.edit_squeue {
             textarea.set_cursor_style(Style::default().bg(Color::Red));
             textarea.set_cursor_line_style(
-                Style::default().fg(Color::Red)
-                .add_modifier(Modifier::BOLD));
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            );
         } else {
             textarea.set_cursor_line_style(Style::default());
             textarea.set_cursor_style(Style::default());
@@ -345,16 +346,14 @@ impl JobOverview {
     fn render_empty_joblist(&self, f: &mut Frame, area: &Rect) {
         let text = "No jobs found";
         let text = Span::styled(text, Style::default().fg(Color::Gray));
-        let paragraph = Paragraph::new(text)
-            .alignment(Alignment::Center);
+        let paragraph = Paragraph::new(text).alignment(Alignment::Center);
         f.render_widget(paragraph, *area);
     }
 
     // ----------------------------------------------------------------------
     // RENDERING THE JOB DETAILS AND LOG SECTION
     // ----------------------------------------------------------------------
-    fn render_bottom_section(&mut self, f: &mut Frame, 
-                             area: &Rect, jobs: &JobList) {
+    fn render_bottom_section(&mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
         self.log_height = area.height.saturating_sub(2);
         match self.collapsed_bot {
             true => self.render_bottom_collapsed(f, area),
@@ -363,44 +362,40 @@ impl JobOverview {
     }
 
     fn render_bottom_collapsed(&mut self, f: &mut Frame, area: &Rect) {
-        let title = vec!{
+        let title = vec![
             Span::raw("▶ "),
-            Span::raw("1. Job details"), 
+            Span::raw("1. Job details"),
             Span::raw("  "),
             Span::raw("2. Log"),
-        };
+        ];
 
         // update the mouse areas
         self.update_bottom_mouse_positions(area, title.clone(), 0);
 
-        let line = Line::from(title).
-            style(Style::default().fg(Color::Gray));
+        let line = Line::from(title).style(Style::default().fg(Color::Gray));
         f.render_widget(line, *area);
     }
 
-    fn render_bottom_extended(
-        &mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
-        let mut title = vec!{
+    fn render_bottom_extended(&mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
+        let mut title = vec![
             Span::raw("▼ "),
-            Span::raw("1. Job details"), 
+            Span::raw("1. Job details"),
             Span::raw("  "),
             Span::raw("2. Log"),
-        };
+        ];
 
         // update the mouse areas
         self.update_bottom_mouse_positions(area, title.clone(), 1);
 
         match self.focus {
             WindowFocus::JobDetails => {
-                title[1] = Span::styled("1. Job details", 
-                                        Style::default().fg(Color::Blue));
-            },
+                title[1] = Span::styled("1. Job details", Style::default().fg(Color::Blue));
+            }
             WindowFocus::Log => {
-                title[3] = Span::styled("2. Log", 
-                                        Style::default().fg(Color::Blue));
-            },
+                title[3] = Span::styled("2. Log", Style::default().fg(Color::Blue));
+            }
         }
-        
+
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
@@ -411,15 +406,14 @@ impl JobOverview {
         match self.focus {
             WindowFocus::JobDetails => {
                 self.render_job_details(f, &rect, jobs);
-            },
+            }
             WindowFocus::Log => {
                 self.render_log(f, &rect, jobs);
-            },
+            }
         }
     }
 
     fn render_job_details(&self, f: &mut Frame, area: &Rect, jobs: &JobList) {
-
         let paragraph = Paragraph::new(jobs.get_job_details())
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true });
@@ -440,9 +434,10 @@ impl JobOverview {
         f.render_widget(paragraph, *area);
     }
 
-    fn update_bottom_mouse_positions(
-        &mut self, area: &Rect, title: Vec<Span>, offset: u16) {
-        if title.len() != 4 { return; }
+    fn update_bottom_mouse_positions(&mut self, area: &Rect, title: Vec<Span>, offset: u16) {
+        if title.len() != 4 {
+            return;
+        }
         let mut top_row = area.clone();
         top_row.height = 1;
         let mut symbol = top_row.clone();
@@ -458,7 +453,6 @@ impl JobOverview {
         self.mouse_areas.details_title = details_title;
         self.mouse_areas.log_title = log_title;
     }
-
 }
 
 fn get_job_color(job: &Job) -> Color {
@@ -474,15 +468,12 @@ fn get_job_color(job: &Job) -> Color {
     }
 }
 
-
 fn format_time(job: &Job) -> String {
     let time_str = job.time.clone();
-    
+
     let parts: Vec<&str> = time_str.split('-').collect();
     match parts.len() {
-        1 => {
-            parts[0].to_string()
-        }
+        1 => parts[0].to_string(),
         2 => {
             let days = parts[0].parse::<i32>().unwrap_or(0);
             if days > 0 {
@@ -495,7 +486,6 @@ fn format_time(job: &Job) -> String {
     }
 }
 
-
 // ====================================================================
 //  USER INPUT
 // ====================================================================
@@ -504,20 +494,21 @@ impl JobOverview {
     /// Handle user input for the job overview window
     /// Returns true if the input was handled
     /// Returns false if the input was not handled
-    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent)
-        -> bool {
-        if !self.handle_input { return false; }
+    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
+        if !self.handle_input {
+            return false;
+        }
 
         if self.edit_squeue {
             match key_event.code {
                 KeyCode::Esc | KeyCode::Enter => {
                     self.exit_squeue_edit(action);
                     return true;
-                },
+                }
                 _ => {
                     self.squeue_command.input(key_event);
                     return true;
-                },
+                }
             }
         }
 
@@ -525,61 +516,63 @@ impl JobOverview {
             // Escaping the program
             KeyCode::Char('q') => {
                 *action = Action::Quit;
-            },
+            }
             // Next / Previous job
             KeyCode::Down | KeyCode::Char('j') => {
                 self.next_job(action);
-            },
+            }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.prev_job(action);
-            },
+            }
             // Open job action menu
             KeyCode::Enter | KeyCode::Char('l') => {
                 *action = Action::OpenMenu(OpenMenu::JobActions);
-            },
+            }
             // Change sorting category
             KeyCode::Tab => {
                 *action = Action::UpdateJobList(JobListAction::NextSortCategory);
-            },
+            }
             KeyCode::Char('r') => {
                 *action = Action::UpdateJobList(JobListAction::ReverseSortDirection);
-            },
+            }
             // Switching focus between job details and log
             KeyCode::Char('1') => {
                 self.select_details();
-            },
+            }
             KeyCode::Char('2') => {
                 self.select_log();
-            },
+            }
             KeyCode::Right => {
                 self.next_focus();
-            },
+            }
             KeyCode::Left => {
                 self.prev_focus();
-            },
+            }
             // Open job allocation menu
             KeyCode::Char('a') => {
                 *action = Action::OpenMenu(OpenMenu::Salloc);
-            },
+            }
             KeyCode::Char('o') => {
                 *action = Action::OpenMenu(OpenMenu::UserOptions);
-            },
+            }
             KeyCode::Char('?') => {
                 *action = Action::OpenMenu(OpenMenu::Help(0));
-            },
+            }
             // Collapsing/Extending the joblist
             KeyCode::Char('m') => {
                 self.collapsed_top = !self.collapsed_top;
-            },
+            }
             KeyCode::Char('n') => {
                 self.collapsed_bot = !self.collapsed_bot;
-            },
+            }
             // Edit the squeue command
             KeyCode::Char('/') => {
                 self.collapsed_top = false;
                 self.edit_squeue = true;
-            },
-            _ => {return false;},
+            }
+            _ => {
+                return false;
+            }
         };
         true
     }
@@ -608,10 +601,10 @@ impl JobOverview {
         match self.focus {
             WindowFocus::JobDetails => {
                 self.focus = WindowFocus::Log;
-            },
+            }
             WindowFocus::Log => {
                 self.focus = WindowFocus::JobDetails;
-            },
+            }
         }
     }
 
@@ -619,10 +612,10 @@ impl JobOverview {
         match self.focus {
             WindowFocus::JobDetails => {
                 self.focus = WindowFocus::Log;
-            },
+            }
             WindowFocus::Log => {
                 self.focus = WindowFocus::JobDetails;
-            },
+            }
         }
     }
 
@@ -641,7 +634,6 @@ impl JobOverview {
     pub fn set_index(&mut self, index: i32) {
         self.state.select(Some(index as usize));
     }
-
 }
 
 // ====================================================================
@@ -649,15 +641,13 @@ impl JobOverview {
 // ====================================================================
 
 impl JobOverview {
-    pub fn mouse_input(
-        &mut self, action: &mut Action, mouse_input: &mut MouseInput,) { 
-
-        if !self.handle_input { return; }
+    pub fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
+        if !self.handle_input {
+            return;
+        }
         let mouse_pos = mouse_input.get_position();
-        
 
         if let Some(event_kind) = mouse_input.kind() {
-
             match event_kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     // if the squeue command is being edited, go back
@@ -677,8 +667,7 @@ impl JobOverview {
                         mouse_input.click();
                     }
                     // joblist categories
-                    for (i, category) in self.mouse_areas
-                                             .categories.iter().enumerate() {
+                    for (i, category) in self.mouse_areas.categories.iter().enumerate() {
                         if category.contains(mouse_pos) {
                             let new_cat = match i {
                                 0 => SortCategory::Id,
@@ -689,8 +678,8 @@ impl JobOverview {
                                 5 => SortCategory::Nodes,
                                 _ => SortCategory::Id,
                             };
-                            *action = Action::UpdateJobList(
-                                JobListAction::SelectSortCategory(new_cat));
+                            *action =
+                                Action::UpdateJobList(JobListAction::SelectSortCategory(new_cat));
                             mouse_input.click();
                         }
                     }
@@ -698,8 +687,7 @@ impl JobOverview {
                     if self.mouse_areas.joblist.contains(mouse_pos) {
                         let rel_y = mouse_pos.y - self.mouse_areas.joblist.y;
                         let new_index = rel_y as usize + self.state.offset();
-                        *action = Action::UpdateJobList(
-                            JobListAction::Select(new_index));
+                        *action = Action::UpdateJobList(JobListAction::Select(new_index));
                         if mouse_input.is_double_click() {
                             *action = Action::OpenMenu(OpenMenu::JobActions);
                         }
@@ -720,19 +708,16 @@ impl JobOverview {
                         self.select_log();
                         mouse_input.click();
                     }
-                },
+                }
                 MouseEventKind::ScrollDown => {
                     self.next_job(action);
-                },
+                }
                 MouseEventKind::ScrollUp => {
                     self.prev_job(action);
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
-
-
-
     }
 }
 
@@ -753,5 +738,3 @@ mod tests {
         assert_eq!(format_time(&job), "1-00:00:10");
     }
 }
-
-

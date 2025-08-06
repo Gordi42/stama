@@ -1,6 +1,6 @@
-use crossterm::event::{MouseEventKind, MouseEvent};
-use std::time::SystemTime;
+use crossterm::event::{MouseEvent, MouseEventKind};
 use ratatui::layout::Position;
+use std::time::SystemTime;
 
 pub struct MouseInput {
     pub event: Option<MouseEvent>,
@@ -26,7 +26,8 @@ impl MouseInput {
         }
 
         let now = SystemTime::now();
-        let duration = now.duration_since(self.last_click_time)
+        let duration = now
+            .duration_since(self.last_click_time)
             .unwrap_or(std::time::Duration::from_secs(60));
         if duration.as_millis() < 500 {
             self.last_click_time = now;

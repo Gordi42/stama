@@ -1,18 +1,16 @@
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
+    layout::{Flex, Layout},
     prelude::*,
     style::{Color, Style},
     widgets::*,
-    layout::{Layout, Flex,},
 };
-use crossterm::event::{
-    KeyCode, KeyEvent, MouseButton, MouseEventKind};
 
-use crate::menus::OpenMenu;
-use crate::text_field::{TextField, TextFieldType};
 use crate::app::Action;
+use crate::menus::OpenMenu;
 use crate::mouse_input::MouseInput;
+use crate::text_field::{TextField, TextFieldType};
 use crate::user_options::UserOptions;
-
 
 pub struct UserOptionsMenu {
     pub should_render: bool,
@@ -36,20 +34,22 @@ impl UserOptionsMenu {
 
         let entries = vec![
             TextField::new(
-                "Refresh rate (ms)", 
-                TextFieldType::Integer(list.refresh_rate)),
+                "Refresh rate (ms)",
+                TextFieldType::Integer(list.refresh_rate),
+            ),
             TextField::new(
-                "Show completed jobs", 
-                TextFieldType::Boolean(list.show_completed_jobs)),
+                "Show completed jobs",
+                TextFieldType::Boolean(list.show_completed_jobs),
+            ),
             TextField::new(
-                "Confirm before quitting", 
-                TextFieldType::Boolean(list.confirm_before_quit)),
+                "Confirm before quitting",
+                TextFieldType::Boolean(list.confirm_before_quit),
+            ),
             TextField::new(
-                "Confirm before killing a job", 
-                TextFieldType::Boolean(list.confirm_before_kill)),
-            TextField::new(
-                "External editor", 
-                TextFieldType::Text(list.external_editor)),
+                "Confirm before killing a job",
+                TextFieldType::Boolean(list.confirm_before_kill),
+            ),
+            TextField::new("External editor", TextFieldType::Text(list.external_editor)),
         ];
 
         Self {
@@ -127,7 +127,7 @@ impl UserOptionsMenu {
             new_index = 0;
         } else if index < 0 {
             new_index = max_ind;
-        } 
+        }
         self.index = new_index;
         self.set_focus(self.index as usize, true);
         self.state.select(Some(self.index as usize));
@@ -146,14 +146,15 @@ impl UserOptionsMenu {
     }
 }
 
-
 // ====================================================================
 //  RENDERING
 // ====================================================================
 
 impl UserOptionsMenu {
     pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
-        if !self.should_render { return; }
+        if !self.should_render {
+            return;
+        }
 
         let window_width = f.area().width;
         let text_area_width = (0.8 * (window_width as f32)) as u16;
@@ -175,8 +176,11 @@ impl UserOptionsMenu {
             .title_top(Line::from("USER SETTINGS:").alignment(Alignment::Center))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Blue))
-            .title_style(Style::default().fg(Color::Blue)
-                         .add_modifier(Modifier::BOLD));
+            .title_style(
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            );
 
         f.render_widget(block.clone(), rect);
 
@@ -192,7 +196,8 @@ impl UserOptionsMenu {
             num_rows = self.max_height as usize;
         }
         let constraints = (0..num_rows)
-            .map(|_| Constraint::Length(1)).collect::<Vec<_>>();
+            .map(|_| Constraint::Length(1))
+            .collect::<Vec<_>>();
         let rects = Layout::default()
             .direction(Direction::Vertical)
             .constraints(constraints)
@@ -202,11 +207,8 @@ impl UserOptionsMenu {
         for (rect, entry) in rects.iter().zip(&mut self.entries[self.offset as usize..]) {
             entry.render(f, rect);
         }
-
-
     }
 }
-
 
 // ====================================================================
 //  USER INPUT
@@ -216,7 +218,9 @@ impl UserOptionsMenu {
     /// Handle user input for the user settings window
     /// Always returns true (input is always handled)
     pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
-        if !self.handle_input { return false; }
+        if !self.handle_input {
+            return false;
+        }
 
         // check if the user is typing in a text field
         let entry = &mut self.entries[self.index as usize];
@@ -233,40 +237,38 @@ impl UserOptionsMenu {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('o') => {
                 *action = Action::UpdateUserOptions;
                 self.deactivate();
-            },
+            }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.next();
-            },
+            }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.previous();
-            },
+            }
             KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char(' ') => {
                 self.entries[self.index as usize].on_enter();
                 *action = Action::UpdateUserOptions;
-            },
+            }
             KeyCode::Char('?') => {
                 *action = Action::OpenMenu(OpenMenu::Help(3));
-            },
-            
+            }
+
             _ => {}
         }
         true
     }
 }
 
-
 // ====================================================================
 //  MOUSE INPUT
 // ====================================================================
 
 impl UserOptionsMenu {
-    pub fn mouse_input(&mut self, 
-                       action: &mut Action, 
-                       mouse_input: &mut MouseInput) {
-        if !self.handle_input { return;}
+    pub fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
+        if !self.handle_input {
+            return;
+        }
 
         if let Some(mouse_event_kind) = mouse_input.kind() {
-
             // check if the user is editing a text field
             let entry = &mut self.entries[self.index as usize];
             if entry.active {
@@ -281,7 +283,7 @@ impl UserOptionsMenu {
                         self.deactivate();
                         mouse_input.click();
                         return;
-                    } 
+                    }
                     // check if the user clicked on a text field
                     for (i, rect) in self.rects.iter().enumerate() {
                         if rect.contains(mouse_input.get_position()) {
@@ -294,15 +296,14 @@ impl UserOptionsMenu {
                             return;
                         }
                     }
-                
                 }
                 // scrolling
                 MouseEventKind::ScrollUp => {
                     self.previous();
-                },
+                }
                 MouseEventKind::ScrollDown => {
                     self.next();
-                },
+                }
                 _ => {}
             }
             // Set the mouse event to handled

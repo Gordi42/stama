@@ -6,8 +6,7 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
-pub type CrosstermTerminal =
-    ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stderr>>;
+pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stderr>>;
 
 use crate::{app::App, event::EventHandler};
 
@@ -30,11 +29,7 @@ impl Tui {
 
     pub fn enter_alternate_screen() -> Result<()> {
         terminal::enable_raw_mode()?;
-        crossterm::execute!(
-            io::stderr(),
-            EnterAlternateScreen,
-            EnableMouseCapture
-        )?;
+        crossterm::execute!(io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
         Ok(())
     }
 
@@ -58,7 +53,6 @@ impl Tui {
         Ok(())
     }
 
-
     /// [`Draw`] the terminal interface by [`rendering`] the widgets.
     ///
     /// [`Draw`]: tui::Terminal::draw
@@ -68,9 +62,7 @@ impl Tui {
             self.terminal.clear()?;
             app.should_redraw = false;
         }
-        self.terminal.draw(|frame| {
-            app.render(frame)
-        })?;
+        self.terminal.draw(|frame| app.render(frame))?;
         Ok(())
     }
 
@@ -80,11 +72,7 @@ impl Tui {
     /// the terminal properties if unexpected errors occur.
     pub fn reset() -> Result<()> {
         terminal::disable_raw_mode()?;
-        crossterm::execute!(
-            io::stderr(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        )?;
+        crossterm::execute!(io::stderr(), LeaveAlternateScreen, DisableMouseCapture)?;
         Ok(())
     }
 
@@ -98,5 +86,3 @@ impl Tui {
         Ok(())
     }
 }
-
-

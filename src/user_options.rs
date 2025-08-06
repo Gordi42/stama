@@ -1,16 +1,15 @@
 use color_eyre::eyre::{self, Result};
+use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::prelude::*;
-use serde::{Deserialize, Serialize};
-
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct UserOptions {
-    pub refresh_rate: usize,          // Refresh rate in milliseconds
-    pub show_completed_jobs: bool,  // Show completed jobs
-    pub confirm_before_quit: bool,  // Confirm before quitting
-    pub confirm_before_kill: bool,  // Confirm before killing a job
-    pub external_editor: String,    // External editor command (e.g. "vim")
+    pub refresh_rate: usize,       // Refresh rate in milliseconds
+    pub show_completed_jobs: bool, // Show completed jobs
+    pub confirm_before_quit: bool, // Confirm before quitting
+    pub confirm_before_kill: bool, // Confirm before killing a job
+    pub external_editor: String,   // External editor command (e.g. "vim")
 }
 
 impl Default for UserOptions {
@@ -39,7 +38,6 @@ impl UserOptions {
         Ok(user_options)
     }
 
-
     pub fn load() -> Self {
         if !file_exists() {
             return Self::default();
@@ -67,15 +65,13 @@ impl UserOptions {
         file.write_all(toml.as_bytes())?;
         Ok(())
     }
-
 }
 
 fn get_file_dir() -> Result<String> {
     let home = std::env::var("HOME");
     let home = match home {
         Ok(path) => path,
-        Err(_) => return Err(eyre::eyre!(
-                "Could not find HOME environment variable")),
+        Err(_) => return Err(eyre::eyre!("Could not find HOME environment variable")),
     };
     Ok(format!("{}/.config/stama", home))
 }
@@ -100,5 +96,3 @@ fn touch_dir(file_dir: &str) -> Result<()> {
         Err(_) => Err(eyre::eyre!("Could not create directory")),
     }
 }
-
-

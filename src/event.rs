@@ -4,9 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use color_eyre::{Result, eyre::eyre};
+use color_eyre::{eyre::eyre, Result};
 use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
-
 
 /// Terminal events.
 #[derive(Clone, Copy, Debug)]
@@ -37,13 +36,12 @@ impl Communicator {
 }
 
 /// Terminal event handler.
-/// It spawns a new thread that waits for an event (tick, keystroke, 
+/// It spawns a new thread that waits for an event (tick, keystroke,
 /// or mouse), and parses the event to the main program.
 pub struct EventHandler {
     communicator: Option<Communicator>,
     tick_rate: u64,
 }
-
 
 impl EventHandler {
     pub fn new(tick_rate: u64) -> Self {
@@ -72,7 +70,7 @@ impl EventHandler {
 
     /// Stop the event handler thread
     ///
-    /// Sends a signal to the event handling thread, to break out of 
+    /// Sends a signal to the event handling thread, to break out of
     /// the loop.
     pub fn stop(&mut self) {
         if let Some(communicator) = &self.communicator {
@@ -89,7 +87,7 @@ impl EventHandler {
         let (sender, receiver) = mpsc::channel();
         // stop pipeline
         let (stop_sender, stop_receiver) = mpsc::channel::<bool>();
-        // the sender of the event pipeline and the receiver of the stop 
+        // the sender of the event pipeline and the receiver of the stop
         // pipeline move to the thread
         thread::spawn(move || {
             let mut last_tick = Instant::now();
@@ -107,12 +105,8 @@ impl EventHandler {
                                 Ok(()) // ignore KeyEventKind::Release on windows
                             }
                         }
-                        CrosstermEvent::Mouse(e) => {
-                            sender.send(Event::Mouse(e))
-                        }
-                        CrosstermEvent::Resize(w, h) => {
-                            sender.send(Event::Resize(w, h))
-                        }
+                        CrosstermEvent::Mouse(e) => sender.send(Event::Mouse(e)),
+                        CrosstermEvent::Resize(w, h) => sender.send(Event::Resize(w, h)),
                         _ => unimplemented!(),
                     };
                     if send_result.is_err() {
@@ -133,4 +127,3 @@ impl EventHandler {
         self.communicator = Some(communicator);
     }
 }
-

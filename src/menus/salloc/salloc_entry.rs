@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-
 /// This module contains the SallocEntry struct, which is used to store the
 /// paramters for the salloc command.
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -40,7 +39,7 @@ impl SallocEntry {
 // ====================================================================
 
 impl SallocEntry {
-    /// Start the salloc command with the parameters 
+    /// Start the salloc command with the parameters
     /// stored in this SallocEntry.
     pub fn start(&self) -> String {
         let mut cmd = "salloc".to_string();

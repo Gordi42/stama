@@ -1,10 +1,9 @@
 use crate::job::Job;
-use std::sync::mpsc;
-use std::thread;
-use std::process::Command;
 use crate::job::JobStatus;
 use crate::user_options::UserOptions;
-
+use std::process::Command;
+use std::sync::mpsc;
+use std::thread;
 
 #[derive(Debug, Clone)]
 pub struct Content {
@@ -15,8 +14,12 @@ pub struct Content {
 }
 
 impl Content {
-    pub fn new(job: Option<Job>, job_list: Vec<Job>, 
-               details_text: String, log_text: String) -> Self {
+    pub fn new(
+        job: Option<Job>,
+        job_list: Vec<Job>,
+        details_text: String,
+        log_text: String,
+    ) -> Self {
         Self {
             job: job,
             job_list: job_list,
@@ -37,13 +40,15 @@ pub struct ContentUpdater {
 
 impl ContentUpdater {
     pub fn new() -> Self {
-        Self {
-            my_process: None,
-        }
+        Self { my_process: None }
     }
-   
-    pub fn tick(&mut self, job: Option<Job>, command: String, 
-                options: UserOptions) -> Option<Content> {
+
+    pub fn tick(
+        &mut self,
+        job: Option<Job>,
+        command: String,
+        options: UserOptions,
+    ) -> Option<Content> {
         // check if there is already a job queued
         let job_clone = job.clone();
         // if not send the new job
@@ -56,9 +61,7 @@ impl ContentUpdater {
                         update_job_content(job_clone, &mut content);
                         Some(content)
                     }
-                    Err(_) => {
-                        None
-                    }
+                    Err(_) => None,
                 }
             }
             None => {
@@ -68,8 +71,7 @@ impl ContentUpdater {
         }
     }
 
-    fn start_new_process(
-        &mut self, job: Option<Job>, command: String, options: UserOptions) {
+    fn start_new_process(&mut self, job: Option<Job>, command: String, options: UserOptions) {
         let (tx, rx) = mpsc::channel();
         let handler = thread::spawn(move || {
             tx.send(get_content(job, command, options)).unwrap_or(());
@@ -82,8 +84,6 @@ impl ContentUpdater {
 }
 
 fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Content {
-
-
     // setup a thread to get the joblist from squeue
     let command_clone = command.clone();
     let (tx_sq, rx_sq) = mpsc::channel();
@@ -94,11 +94,9 @@ fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Conte
     let command_clone = command.clone();
     let (tx_sa, rx_sa) = mpsc::channel();
     let handle_sa = match options.show_completed_jobs {
-        true => {
-            thread::spawn(move || {
-                tx_sa.send(get_acct_joblist(&command_clone)).unwrap();
-            })
-        },
+        true => thread::spawn(move || {
+            tx_sa.send(get_acct_joblist(&command_clone)).unwrap();
+        }),
         false => thread::spawn(|| {}),
     };
     // setup a thread to get the job details
@@ -109,24 +107,20 @@ fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Conte
             thread::spawn(move || {
                 tx_jd.send(get_job_details(&job_id_clone)).unwrap();
             })
-        },
-        None => {
-            thread::spawn(|| {})
         }
+        None => thread::spawn(|| {}),
     };
     // setup a thread to get the log
     let (tx_log, rx_log) = mpsc::channel();
     let handle_log = match job {
-        Some(ref job) => {
-            match job.get_stdout() {
-                Some(ref output) => {
-                    let log_path = output.clone();
-                    thread::spawn(move || {
-                        tx_log.send(get_log_tail(&log_path)).unwrap();
-                    })
-                },
-                None => thread::spawn(|| {}),
+        Some(ref job) => match job.get_stdout() {
+            Some(ref output) => {
+                let log_path = output.clone();
+                thread::spawn(move || {
+                    tx_log.send(get_log_tail(&log_path)).unwrap();
+                })
             }
+            None => thread::spawn(|| {}),
         },
         None => thread::spawn(|| {}),
     };
@@ -150,18 +144,19 @@ fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Conte
                 Some(_) => {
                     log_text = rx_log.recv().unwrap();
                     handle_log.join().unwrap();
-                },
-                None => {},
+                }
+                None => {}
             }
-        },
-        None => {},
+        }
+        None => {}
     }
     // if a job is JobStatus::Completing, another job JobStatus::Completed exist
     // remove the JobStatus::Completed job
     for (i, job) in joblist.iter().enumerate() {
         if job.status == JobStatus::Completing {
             // get all indexes of jobs with the same id
-            let indexes = joblist.iter()
+            let indexes = joblist
+                .iter()
                 .enumerate()
                 .filter(|(_, j)| j.id == job.id)
                 .map(|(i, _)| i)
@@ -211,16 +206,23 @@ fn set_content_no_info(content: &mut Content) {
     text = text + "\nWorkdir: " + &content.job.as_ref().unwrap().workdir;
     text = text + "\nCommand: " + &content.job.as_ref().unwrap().command;
     content.details_text = text;
-    content.log_text = "Slurm has no database entry of the output file for completed jobs."
-        .to_string();
+    content.log_text =
+        "Slurm has no database entry of the output file for completed jobs.".to_string();
 }
-
 
 fn get_squeue_joblist(command: &str) -> Vec<Job> {
     let format_entries = vec![
-        "JobID:16", "Name:32", "StateCompact:2", "TimeUsed:16", 
-        "PendingTime:16", "Partition:16", "NumNodes:8",
-        "WorkDir:256", "Command:256", "StdOut:256"];
+        "JobID:16",
+        "Name:32",
+        "StateCompact:2",
+        "TimeUsed:16",
+        "PendingTime:16",
+        "Partition:16",
+        "NumNodes:8",
+        "WorkDir:256",
+        "Command:256",
+        "StdOut:256",
+    ];
     let format = format_entries.join("|%|,");
     let command = format!("{} --Format=\",{},\"", command, format);
     let output = get_squeue_output(&command);
@@ -233,9 +235,7 @@ pub fn get_squeue_output(command: &str) -> String {
     let program = parts.next().unwrap_or(" ");
     let args: Vec<&str> = parts.collect();
 
-    let command_stat = Command::new(program)
-        .args(args)
-        .output();
+    let command_stat = Command::new(program).args(args).output();
 
     match command_stat {
         Ok(output) => {
@@ -244,10 +244,8 @@ pub fn get_squeue_output(command: &str) -> String {
             }
             let output = String::from_utf8_lossy(&output.stdout);
             output.to_string()
-        },
-        Err(_) => {
-            "Error executing squeue".to_string()
-        },
+        }
+        Err(_) => "Error executing squeue".to_string(),
     }
 }
 
@@ -274,9 +272,17 @@ pub fn format_squeue_output(output: &str) -> Vec<Job> {
         let command = parts[8].to_string();
         let output = parts[9].to_string();
 
-        joblist.push(Job::new(&id, &name, status, 
-                              &time, &partition, nodes,
-                              &workdir, &command, Some(output)));
+        joblist.push(Job::new(
+            &id,
+            &name,
+            status,
+            &time,
+            &partition,
+            nodes,
+            &workdir,
+            &command,
+            Some(output),
+        ));
     }
     joblist
 }
@@ -286,22 +292,27 @@ fn get_acct_joblist(command: &str) -> Vec<Job> {
     format_sacct_output(&output)
 }
 
-
 pub fn get_sacct_output(command: &str) -> String {
     let mut parts = command.trim().split_whitespace();
     let _program = parts.next().unwrap_or(" ");
     let args: Vec<&str> = parts.collect();
 
     let entries = vec![
-        "JobID%16", "JobName%16", "State%16", 
-        "Elapsed%16", "Partition%16", "NNodes%16",
-        "WorkDir%256", "SubmitLine%256"];
+        "JobID",
+        "JobName",
+        "State",
+        "Elapsed",
+        "Partition",
+        "NNodes",
+        "WorkDir",
+        "SubmitLine",
+    ];
     let format = entries.join(",");
     let format_arg = format!("--format={}", format);
 
     let command_stat = Command::new("sacct")
         .args(args)
-        .args(&[format_arg, "-n".to_string()])
+        .args(&[format_arg, "--parsable2".to_string(), "-n".to_string()])
         .output();
     match command_stat {
         Ok(output) => {
@@ -310,63 +321,62 @@ pub fn get_sacct_output(command: &str) -> String {
             }
             let output = String::from_utf8_lossy(&output.stdout);
             output.to_string()
-        },
-        Err(_) => {
-            "Error executing sacct".to_string()
-        },
+        }
+        Err(_) => "Error executing sacct".to_string(),
     }
 }
 
 pub fn format_sacct_output(output: &str) -> Vec<Job> {
     let mut joblist = vec![];
-    for line in output.lines().skip(2) {
-
-        let partition = line[4*17..5*17].trim();
-        if partition.is_empty() { continue; }
-        let id = line[0..17].trim();
-        let name = line[17..2*17].trim().to_string();
-        let status_text = line[2*17..3*17].trim();
-        let status = if status_text.starts_with("COMPLETED") {
-            JobStatus::Completed
-        } else if status_text.starts_with("TIMEOUT") {
-            JobStatus::Timeout
-        } else if status_text.starts_with("CANCELLED") {
-            JobStatus::Cancelled
-        } else if status_text.starts_with("FAILED") {
-            JobStatus::Failed
-        } else if status_text.starts_with("RUNNING") {
-            continue;
-        } else if status_text.starts_with("PENDING") {
+    for line in output.lines() {
+        if line.trim().is_empty() {
             continue;
         }
-        else {
-            JobStatus::Unknown
+
+        let fields: Vec<&str> = line.split('|').collect();
+        if fields.len() < 8 {
+            continue;
+        }
+
+        let id = fields[0].trim();
+        let name = fields[1].trim().to_string();
+        let status_text = fields[2].trim();
+        let status = match status_text {
+            s if s.starts_with("COMPLETED") => JobStatus::Completed,
+            s if s.starts_with("TIMEOUT") => JobStatus::Timeout,
+            s if s.starts_with("CANCELLED") => JobStatus::Cancelled,
+            s if s.starts_with("FAILED") => JobStatus::Failed,
+            s if s.starts_with("RUNNING") => continue,
+            s if s.starts_with("PENDING") => continue,
+            _ => JobStatus::Unknown,
         };
-        let time = line[3*17..4*17].trim().to_string();
-        let nodes = line[5*17..6*17].trim().parse::<u32>().unwrap_or(0);
-        let workdir = line[6*17..6*17+257].trim().to_string();
-        let command = line[6*17+257..6*17+2*257].trim().to_string();
-        joblist.push(Job::new(&id, &name, status, 
-                              &time, partition, nodes,
-                              &workdir, &command, None));
+
+        let time = fields[3].trim();
+        let partition = fields[4].trim();
+        if partition.is_empty() {
+            continue;
+        }
+
+        let nodes = fields[5].trim().parse::<u32>().unwrap_or(0);
+        let workdir = fields[6].trim().to_string();
+        let command = fields[7].trim().to_string();
+
+        joblist.push(Job::new(
+            &id, &name, status, &time, partition, nodes, &workdir, &command, None,
+        ));
     }
     joblist
 }
 
-
 pub fn get_job_details(job_id: &str) -> String {
     let args = vec!["show", "job", &job_id];
-    let command_stat = Command::new("scontrol")
-        .args(args)
-        .output();
+    let command_stat = Command::new("scontrol").args(args).output();
     match command_stat {
         Ok(output) => {
             let output = String::from_utf8_lossy(&output.stdout);
             output.to_string()
-        },
-        Err(e) => {
-            e.to_string()
-        },
+        }
+        Err(e) => e.to_string(),
     }
 }
 
@@ -400,10 +410,8 @@ fn get_log_tail(log_path: &str) -> String {
         Ok(output) => {
             let output = String::from_utf8_lossy(&output.stdout);
             output.to_string()
-        },
-        Err(e) => {
-            e.to_string()
-        },
+        }
+        Err(e) => e.to_string(),
     }
 }
 
@@ -427,5 +435,3 @@ fn format_time_pending(time_str: &str) -> String {
     let seconds = time_in_sec % 60;
     format!("{}-{:02}:{:02}:{:02}", days, hours, minutes, seconds)
 }
-
-

@@ -1,6 +1,5 @@
 use regex::Regex;
 
-
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum JobStatus {
     #[default]
@@ -46,14 +45,14 @@ impl std::fmt::Display for JobStatus {
 
 #[derive(Debug, Clone, Default)]
 pub struct Job {
-    pub id: String,         // the job id
-    pub name: String,       // the name of the job
-    pub status: JobStatus,  // the status of the job
-    pub time: String,       // time string
-    pub partition: String,  // the partition the job is running on
-    pub nodes: u32,         // the number of nodes the job is running on
-    pub workdir: String,    // the working directory of the job
-    pub command: String,    // the command the job is running
+    pub id: String,             // the job id
+    pub name: String,           // the name of the job
+    pub status: JobStatus,      // the status of the job
+    pub time: String,           // time string
+    pub partition: String,      // the partition the job is running on
+    pub nodes: u32,             // the number of nodes the job is running on
+    pub workdir: String,        // the working directory of the job
+    pub command: String,        // the command the job is running
     pub output: Option<String>, // the output of the job
 }
 
@@ -62,9 +61,17 @@ pub struct Job {
 // ====================================================================
 
 impl Job {
-    pub fn new(id: &str, name: &str, status: JobStatus, 
-               time: &str, partition: &str, nodes: u32,
-               workdir: &str, command: &str, output: Option<String>) -> Self {
+    pub fn new(
+        id: &str,
+        name: &str,
+        status: JobStatus,
+        time: &str,
+        partition: &str,
+        nodes: u32,
+        workdir: &str,
+        command: &str,
+        output: Option<String>,
+    ) -> Self {
         Self {
             id: id.to_string(),
             name: name.to_string(),
@@ -111,26 +118,29 @@ impl Job {
                 let mut output = output.to_string();
                 output = output.replace("%j", &self.id);
                 output = output.replace("%x", &self.name);
-                // we also want to cover the case when %<number>j is used 
-                // where <number> is the minimum number of digits to be used 
+                // we also want to cover the case when %<number>j is used
+                // where <number> is the minimum number of digits to be used
                 // leading zeros are added if the number of digits is less than <number>
                 // Define a regular expression pattern to match %<n>j
                 let re = Regex::new(r"%\d+j").unwrap();
 
                 // Use the replace_all method to replace all occurrences of the pattern with the job ID
-                Some(re.replace_all(&output, |caps: &regex::Captures| {
-                    // Extract the matched number from the pattern
-                    let num_str = &caps[0][1..caps[0].len() - 1];
-                    // Parse the number as usize
-                    if let Ok(num) = num_str.parse::<usize>() {
-                        // Generate the replacement string with the job ID
-                        format!("{:0>width$}", &self.id, width = num)
-                    } else {
-                        // If parsing fails, return the original match
-                        caps[0].to_string()
-                    }
-                }).to_string())
-            },
+                Some(
+                    re.replace_all(&output, |caps: &regex::Captures| {
+                        // Extract the matched number from the pattern
+                        let num_str = &caps[0][1..caps[0].len() - 1];
+                        // Parse the number as usize
+                        if let Ok(num) = num_str.parse::<usize>() {
+                            // Generate the replacement string with the job ID
+                            format!("{:0>width$}", &self.id, width = num)
+                        } else {
+                            // If parsing fails, return the original match
+                            caps[0].to_string()
+                        }
+                    })
+                    .to_string(),
+                )
+            }
             None => None,
         }
     }
@@ -145,6 +155,3 @@ impl Job {
         }
     }
 }
-
-
-

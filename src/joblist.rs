@@ -1,4 +1,4 @@
-use color_eyre::{Result, eyre::eyre};
+use color_eyre::{eyre::eyre, Result};
 use std::process::Command;
 
 use crate::job::Job;
@@ -78,23 +78,20 @@ impl JobList {
             sort_category: SortCategory::Id,
             reverse: false,
             content_updater: ContentUpdater::new(),
-            squeue_command: format!("squeue -u {}", whoami())
+            squeue_command: format!("squeue -u {}", whoami()),
         }
     }
 }
 
 /// Returns the username of the current user.
 fn whoami() -> String {
-    let command = Command::new("whoami")
-        .output();
+    let command = Command::new("whoami").output();
     match command {
         Ok(output) => {
             let output = String::from_utf8_lossy(&output.stdout);
             output.to_string()
-        },
-        Err(_) => {
-            "Error executing whoami".to_string()
-        },
+        }
+        Err(_) => "Error executing whoami".to_string(),
     }
 }
 
@@ -128,7 +125,7 @@ impl JobList {
         &self.sort_category
     }
 
-    /// Returns a boolean that indicates whether the jobs are sorted 
+    /// Returns a boolean that indicates whether the jobs are sorted
     /// in reverse order.
     pub fn is_reverse(&self) -> bool {
         self.reverse
@@ -163,7 +160,7 @@ impl JobList {
             return Err(eyre!("Index out of bounds"));
         }
         self.selected = index;
-        
+
         Ok(())
     }
 
@@ -189,7 +186,7 @@ impl JobList {
         }
     }
 
-    /// Handles an action that changes the selected job. 
+    /// Handles an action that changes the selected job.
     /// Or changes the sort category or the reverse boolean.
     pub fn handle_joblist_action(&mut self, action: JobListAction) {
         match action {
@@ -236,7 +233,7 @@ impl JobList {
     /// Negates the reverse boolean.
     pub fn negate_reverse(&mut self) {
         self.reverse = !self.reverse;
-        // sort the jobs 
+        // sort the jobs
         self.sort_raw();
         // set the index to the first job
         // unwrap is safe here because set_index(0) is guaranteed to succeed
@@ -255,14 +252,16 @@ impl JobList {
         let job: Option<Job> = self.get_job().cloned();
         let command = self.squeue_command.clone();
         // check if the content updater returns a new job list
-        match self.content_updater.tick(
-            job.clone(), command, user_options.clone()) {
+        match self
+            .content_updater
+            .tick(job.clone(), command, user_options.clone())
+        {
             Some(content) => {
                 self.jobs = content.job_list;
                 self.job_details = content.details_text;
                 self.log_tail = content.log_text;
             }
-            None => { }
+            None => {}
         }
         // sort the job list
         self.sort_raw();
@@ -282,7 +281,9 @@ impl JobList {
     /// Select the next job in the list.
     pub fn next(&mut self) {
         // check if the job list is empty
-        if self.jobs.is_empty() { return; }
+        if self.jobs.is_empty() {
+            return;
+        }
         // if the selected job is the last job, select the first job
         let new_index = (self.selected + 1) % self.len();
         // unwrap is safe here because new_index is always in bounds
@@ -294,7 +295,9 @@ impl JobList {
     /// Select the previous job in the list.
     pub fn previous(&mut self) {
         // check if the job list is empty
-        if self.jobs.is_empty() { return; }
+        if self.jobs.is_empty() {
+            return;
+        }
         let job_count = self.len();
         // if the selected job is the first job, select the last job
         let new_index = (self.selected + job_count - 1) % job_count;
@@ -307,40 +310,39 @@ impl JobList {
     /// Raw sorting function that does not update the selected job index.
     fn sort_raw(&mut self) {
         // only sort if there are jobs
-        if self.jobs.is_empty() { return; }
+        if self.jobs.is_empty() {
+            return;
+        }
         // sort the job list based on the sort_category
         // secondary sort is based on the id
         match self.sort_category {
             SortCategory::Id => {
                 self.jobs.sort_by(|a, b| b.id.cmp(&a.id));
-            },
+            }
             SortCategory::Name => {
-                self.jobs.sort_by(|a, b| {
-                    a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id))
-                });
-            },
+                self.jobs
+                    .sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+            }
             SortCategory::Status => {
                 self.jobs.sort_by(|a, b| {
-                    a.status.priority().cmp(&b.status.priority())
+                    a.status
+                        .priority()
+                        .cmp(&b.status.priority())
                         .then_with(|| a.id.cmp(&b.id))
                 });
-            },
+            }
             SortCategory::Time => {
-                self.jobs.sort_by(|a, b| {
-                    a.time.cmp(&b.time).then_with(|| a.id.cmp(&b.id))
-                });
-            },
+                self.jobs
+                    .sort_by(|a, b| a.time.cmp(&b.time).then_with(|| a.id.cmp(&b.id)));
+            }
             SortCategory::Partition => {
-                self.jobs.sort_by(|a, b| {
-                    a.partition.cmp(&b.partition)
-                        .then_with(|| a.id.cmp(&b.id))
-                });
-            },
+                self.jobs
+                    .sort_by(|a, b| a.partition.cmp(&b.partition).then_with(|| a.id.cmp(&b.id)));
+            }
             SortCategory::Nodes => {
-                self.jobs.sort_by(|a, b| {
-                    b.nodes.cmp(&a.nodes).then_with(|| a.id.cmp(&b.id))
-                });
-            },
+                self.jobs
+                    .sort_by(|a, b| b.nodes.cmp(&a.nodes).then_with(|| a.id.cmp(&b.id)));
+            }
         }
         // reverse the list if needed
         if self.reverse {
@@ -349,16 +351,18 @@ impl JobList {
     }
 
     /// Sorts the job list.
-    /// Update the selected job index such that the selected job 
+    /// Update the selected job index such that the selected job
     /// remains the same.
     pub fn sort(&mut self) {
         // only sort if there are jobs
-        if self.jobs.is_empty() { return; }
+        if self.jobs.is_empty() {
+            return;
+        }
         // get the id of the job in focus
         if let Some(job) = self.get_job() {
             let id = job.id.clone();
             self.sort_raw();
-            // unwrap is safe here because the job in focus is 
+            // unwrap is safe here because the job in focus is
             // guaranteed to exist
             self.select_job_by_id(id).unwrap();
         } else {
@@ -380,17 +384,38 @@ mod tests {
     fn create_job_list() -> JobList {
         let mut job_list = JobList::new();
         job_list.jobs.push(Job::new(
-                "1", "job1", JobStatus::Running, 
-                "00:00:00", "partition1", 1,
-                "workdir1", "command1", None));
+            "1",
+            "job1",
+            JobStatus::Running,
+            "00:00:00",
+            "partition1",
+            1,
+            "workdir1",
+            "command1",
+            None,
+        ));
         job_list.jobs.push(Job::new(
-                "2", "job2", JobStatus::Pending,
-                "00:00:00", "partition1", 2,
-                "workdir2", "command2", None));
+            "2",
+            "job2",
+            JobStatus::Pending,
+            "00:00:00",
+            "partition1",
+            2,
+            "workdir2",
+            "command2",
+            None,
+        ));
         job_list.jobs.push(Job::new(
-                "3", "job3", JobStatus::Completing,
-                "00:00:00", "partition1", 3,
-                "workdir3", "command3", None));
+            "3",
+            "job3",
+            JobStatus::Completing,
+            "00:00:00",
+            "partition1",
+            3,
+            "workdir3",
+            "command3",
+            None,
+        ));
         job_list
     }
 
@@ -504,7 +529,7 @@ mod tests {
         // check if the selected job remains the same
         assert_eq!(job_list.get_job().unwrap().id, job.id);
 
-        // There are many more tests that could be added here. 
+        // There are many more tests that could be added here.
         // For example, tests for sorting by different categories.
         // However, this is sufficient for now.
     }

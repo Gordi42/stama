@@ -5,25 +5,24 @@ use crate::{
     app::App,
     event::{Event, EventHandler},
     tui::Tui,
-    write_output::write_output_file,};
+    write_output::write_output_file,
+};
 
 pub mod app;
 pub mod event;
+pub mod job;
+pub mod joblist;
+pub mod menus;
+pub mod mouse_input;
+pub mod text_field;
 pub mod tui;
 pub mod update_content;
-pub mod mouse_input;
-pub mod job;
-pub mod text_field;
 pub mod user_options;
-pub mod menus;
 pub mod write_output;
-pub mod joblist;
-
 
 fn main() -> Result<()> {
     let mut app = App::new();
     app.menus.job_overview.set_index(0);
- 
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(std::io::stderr());
@@ -39,13 +38,16 @@ fn main() -> Result<()> {
         tui.draw(&mut app)?;
         // Handle events.
         match tui.events.next()? {
-            Event::Tick => {app.update_jobs();}
+            Event::Tick => {
+                app.update_jobs();
+            }
             Event::Key(key_event) => app.input(key_event),
             Event::Mouse(mouse_event) => app.mouse_input(mouse_event),
             Event::Resize(_, _) => {}
         };
         if app.should_set_frame_rate {
-            tui.events.set_tick_rate(app.user_options.refresh_rate as u64);
+            tui.events
+                .set_tick_rate(app.user_options.refresh_rate as u64);
             app.should_set_frame_rate = false;
         };
         if app.open_vim {
@@ -58,7 +60,6 @@ fn main() -> Result<()> {
             app.start_salloc();
             tui.enter()?;
         }
-
     }
     // Exit the user interface.
     tui.exit()?;
