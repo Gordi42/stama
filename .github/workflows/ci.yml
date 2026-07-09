@@ -4,8 +4,10 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
   schedule:
-    # Weekly run to catch breakage from new toolchain releases and advisories.
+    # Weekly run to catch breakage from new toolchain releases, new
+    # dependency releases (latest-deps job), and advisories.
     - cron: "17 4 * * 1"
 
 concurrency:
@@ -44,6 +46,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check with MSRV
         run: cargo check --all-targets
+
+  # `cargo install stama` resolves the *newest* semver-compatible versions of
+  # every dependency, ignoring Cargo.lock. A new release of e.g. ratatui can
+  # therefore break fresh installs while locally-built binaries keep working.
+  # This job simulates a fresh install every week: update to the latest
+  # compatible dependencies, then build and test.
+  latest-deps:
+    name: Latest dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Update to latest compatible dependencies
+        run: cargo update --verbose
+      - name: Build with latest dependencies
+        run: cargo build --all-targets
+      - name: Test with latest dependencies
+        run: cargo test
 
   audit:
     name: Security audit

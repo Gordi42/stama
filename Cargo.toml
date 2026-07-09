@@ -17,3 +17,7 @@ toml = "0.5.8"
 serde = { version = "1.0.197", features = ["derive"] }
 clap = "4.5.4"
 regex = "1.5.4"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+tempfile = "3.27.0"
