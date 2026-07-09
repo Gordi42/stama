@@ -1,6 +1,7 @@
 use crate::job::Job;
 use crate::job::JobStatus;
 use crate::user_options::UserOptions;
+use std::collections::HashSet;
 use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
@@ -67,7 +68,15 @@ impl ContentUpdater {
                         update_job_content(job_clone, &mut content);
                         Some(content)
                     }
-                    Err(_) => None,
+                    // the worker is still running, check again on the next tick
+                    Err(mpsc::TryRecvError::Empty) => None,
+                    // the worker died without sending (e.g. it panicked);
+                    // drop the dead process so the next tick spawns a fresh one
+                    // instead of freezing the job list forever
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.my_process = None;
+                        None
+                    }
                 }
             }
             None => {
@@ -150,27 +159,26 @@ fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Conte
             handle_log.join().unwrap();
         }
     }
-    // if a job is JobStatus::Completing, another job JobStatus::Completed exist
-    // remove the JobStatus::Completed job
-    for (i, job) in joblist.iter().enumerate() {
-        if job.status == JobStatus::Completing {
-            // get all indexes of jobs with the same id
-            let indexes = joblist
-                .iter()
-                .enumerate()
-                .filter(|(_, j)| j.id == job.id)
-                .map(|(i, _)| i)
-                .collect::<Vec<usize>>();
-            for index in indexes {
-                if index != i {
-                    joblist.remove(index);
-                }
-            }
-            break;
-        }
-    }
+    // if a job is JobStatus::Completing (from squeue), sacct may still report
+    // a JobStatus::Completed entry with the same id
+    // remove the JobStatus::Completed duplicates
+    remove_completed_duplicates(&mut joblist);
 
     Content::new(job, joblist, details_text, log_text)
+}
+
+/// Remove `Completed` entries (from sacct) whose job id also appears as a
+/// `Completing` entry (from squeue), keeping the `Completing` one.
+fn remove_completed_duplicates(joblist: &mut Vec<Job>) {
+    let completing_ids: HashSet<String> = joblist
+        .iter()
+        .filter(|j| j.status == JobStatus::Completing)
+        .map(|j| j.id.clone())
+        .collect();
+    if completing_ids.is_empty() {
+        return;
+    }
+    joblist.retain(|j| !(j.status == JobStatus::Completed && completing_ids.contains(&j.id)));
 }
 
 fn update_job_content(job: Option<Job>, content: &mut Content) {
@@ -240,11 +248,15 @@ pub fn get_squeue_output(command: &str) -> String {
     match command_stat {
         Ok(output) => {
             if !output.status.success() {
+                // TODO(scheduler-refactor): return a Result instead of a
+                // sentinel string; the parsers currently treat this as
+                // output that yields zero jobs
                 return "Error executing command".to_string();
             }
             let output = String::from_utf8_lossy(&output.stdout);
             output.to_string()
         }
+        // TODO(scheduler-refactor): return a Result instead of a sentinel string
         Err(_) => "Error executing squeue".to_string(),
     }
 }
@@ -253,7 +265,13 @@ pub fn format_squeue_output(output: &str) -> Vec<Job> {
     let mut joblist = vec![];
     for line in output.lines().skip(1) {
         let parts = line.split("|%|").map(|s| s.trim()).collect::<Vec<&str>>();
-        // if parts.len() < 11 { continue; }
+        // A well-formed line has 10 fields separated by 9 "|%|" delimiters
+        // (the --Format suffix is attached to every entry except the last),
+        // so splitting yields exactly 10 parts. Skip anything shorter
+        // (error messages, help text, truncated output) instead of panicking.
+        if parts.len() < 10 {
+            continue;
+        }
         let id = parts[0].to_string();
         let name = parts[1].to_string();
         let status = match parts[2] {
@@ -317,11 +335,15 @@ pub fn get_sacct_output(command: &str) -> String {
     match command_stat {
         Ok(output) => {
             if !output.status.success() {
+                // TODO(scheduler-refactor): return a Result instead of a
+                // sentinel string; the parsers currently treat this as
+                // output that yields zero jobs
                 return "Error executing sacct".to_string();
             }
             let output = String::from_utf8_lossy(&output.stdout);
             output.to_string()
         }
+        // TODO(scheduler-refactor): return a Result instead of a sentinel string
         Err(_) => "Error executing sacct".to_string(),
     }
 }
@@ -434,4 +456,226 @@ fn format_time_pending(time_str: &str) -> String {
     let minutes = (time_in_sec % 3600) / 60;
     let seconds = time_in_sec % 60;
     format!("{}-{:02}:{:02}:{:02}", days, hours, minutes, seconds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ----------------------------------------------------------------
+    // format_sacct_output
+    // ----------------------------------------------------------------
+    // Field order must match the --format list in get_sacct_output:
+    // JobID|JobName|State|Elapsed|Partition|NNodes|WorkDir|SubmitLine
+    // (--parsable2: '|'-separated, no trailing delimiter; -n: no header)
+
+    #[test]
+    fn format_sacct_output_parses_completed_and_cancelled_jobs() {
+        let output = "\
+1001|myjob|COMPLETED|01:00:00|compute|2|/home/user/run|sbatch job.sh
+1001.batch|batch|COMPLETED|01:00:00||2|/home/user/run|
+1001.extern|extern|COMPLETED|01:00:00||2|/home/user/run|
+1002|cancelled_job|CANCELLED by 4242|00:10:00|gpu|1|/home/user/other|sbatch cancel.sh
+1003|running_job|RUNNING|00:05:00|compute|4|/home/user/run|sbatch run.sh
+";
+        let jobs = format_sacct_output(output);
+
+        // step rows (.batch/.extern, empty Partition) are skipped,
+        // RUNNING rows are filtered out
+        assert_eq!(jobs.len(), 2);
+
+        assert_eq!(jobs[0].id, "1001");
+        assert_eq!(jobs[0].name, "myjob");
+        assert_eq!(jobs[0].status, JobStatus::Completed);
+        assert_eq!(jobs[0].time, "01:00:00");
+        assert_eq!(jobs[0].partition, "compute");
+        assert_eq!(jobs[0].nodes, 2);
+        assert_eq!(jobs[0].workdir, "/home/user/run");
+        assert_eq!(jobs[0].command, "sbatch job.sh");
+
+        assert_eq!(jobs[1].id, "1002");
+        assert_eq!(jobs[1].status, JobStatus::Cancelled);
+        assert_eq!(jobs[1].nodes, 1);
+    }
+
+    // ----------------------------------------------------------------
+    // format_squeue_output
+    // ----------------------------------------------------------------
+    // Field order must match the --Format list in get_squeue_joblist:
+    // JobID, Name, StateCompact, TimeUsed, PendingTime, Partition,
+    // NumNodes, WorkDir, Command, StdOut
+    // The "|%|" suffix is attached to every field except the last, so a
+    // line has 10 fields and 9 delimiters. The first line is the header.
+
+    fn squeue_line(fields: [&str; 10]) -> String {
+        fields.join("|%|")
+    }
+
+    #[test]
+    fn format_squeue_output_parses_running_and_pending_jobs() {
+        let header = "JOBID|%|NAME|%|ST|%|TIME|%|PENDING_TIME|%|PARTITION|%|NODES|%|WORK_DIR|%|COMMAND|%|STDOUT";
+        let running = squeue_line([
+            "1234 ",
+            " job_running ",
+            "R ",
+            "12:34 ",
+            "0 ",
+            "main ",
+            "1 ",
+            "/work ",
+            "/work/run.sh ",
+            "/work/out-%j.log ",
+        ]);
+        let pending = squeue_line([
+            "5678",
+            "job_pending",
+            "PD",
+            "0:00",
+            "3661",
+            "gpu",
+            "2",
+            "/work2",
+            "/work2/run.sh",
+            "/work2/out.log",
+        ]);
+        let output = format!("{}\n{}\n{}\n", header, running, pending);
+
+        let jobs = format_squeue_output(&output);
+        assert_eq!(jobs.len(), 2);
+
+        assert_eq!(jobs[0].id, "1234");
+        assert_eq!(jobs[0].name, "job_running");
+        assert_eq!(jobs[0].status, JobStatus::Running);
+        // running jobs use TimeUsed, padded into D-HH:MM:SS
+        assert_eq!(jobs[0].time, "0-00:12:34");
+        assert_eq!(jobs[0].partition, "main");
+        assert_eq!(jobs[0].nodes, 1);
+        assert_eq!(jobs[0].workdir, "/work");
+        assert_eq!(jobs[0].command, "/work/run.sh");
+        assert_eq!(jobs[0].output.as_deref(), Some("/work/out-%j.log"));
+
+        assert_eq!(jobs[1].id, "5678");
+        assert_eq!(jobs[1].status, JobStatus::Pending);
+        // pending jobs use PendingTime (seconds): 3661 s = 1 h 1 min 1 s
+        assert_eq!(jobs[1].time, "0-01:01:01");
+        assert_eq!(jobs[1].nodes, 2);
+    }
+
+    // ----------------------------------------------------------------
+    // malformed input (regression test for the bounds guard)
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn malformed_input_does_not_panic() {
+        let inputs = [
+            "",
+            "garbage",
+            "a|%|b|%|c",
+            "a|b|c",
+            "Error executing command",
+            "Error executing squeue",
+            "Error executing sacct",
+            "Usage: squeue [OPTIONS]\n  -A, --account=account(s)\n  -h, --noheader\nHelp options:\n  --help  show this help message\n",
+            "JOBID|%|NAME\n1234|%|too_short\n",
+            "\n\n\n",
+        ];
+        for input in inputs {
+            // must not panic; garbage yields no (or only partial) jobs
+            let squeue_jobs = format_squeue_output(input);
+            assert!(
+                squeue_jobs.is_empty(),
+                "unexpected squeue jobs from {:?}",
+                input
+            );
+            let sacct_jobs = format_sacct_output(input);
+            assert!(
+                sacct_jobs.is_empty(),
+                "unexpected sacct jobs from {:?}",
+                input
+            );
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // time formatting
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn format_time_used_edge_cases() {
+        // shorter strings are padded into the D-HH:MM:SS template
+        assert_eq!(format_time_used("15"), "0-00:00:15");
+        assert_eq!(format_time_used("1:23"), "0-00:01:23");
+        assert_eq!(format_time_used("12:34:56"), "0-12:34:56");
+        assert_eq!(format_time_used("1-02:03:04"), "1-02:03:04");
+        // longer strings are passed through unchanged
+        assert_eq!(format_time_used("12-02:03:04"), "12-02:03:04");
+        // empty input yields the zero template
+        assert_eq!(format_time_used(""), "0-00:00:00");
+        // garbage input must not panic
+        let _ = format_time_used("garbage");
+        let _ = format_time_used("N/A");
+    }
+
+    #[test]
+    fn format_time_pending_edge_cases() {
+        assert_eq!(format_time_pending("0"), "0-00:00:00");
+        assert_eq!(format_time_pending("59"), "0-00:00:59");
+        assert_eq!(format_time_pending("3661"), "0-01:01:01");
+        assert_eq!(format_time_pending("90061"), "1-01:01:01");
+        // non-numeric input falls back to zero and must not panic
+        assert_eq!(format_time_pending(""), "0-00:00:00");
+        assert_eq!(format_time_pending("garbage"), "0-00:00:00");
+        assert_eq!(format_time_pending("-5"), "0-00:00:00");
+    }
+
+    // ----------------------------------------------------------------
+    // duplicate removal (regression test for the index-shift bug)
+    // ----------------------------------------------------------------
+
+    fn job(id: &str, status: JobStatus) -> Job {
+        Job::new(
+            id,
+            &format!("job_{}", id),
+            status,
+            "0-00:01:00",
+            "main",
+            1,
+            "/work",
+            "cmd",
+            None,
+        )
+    }
+
+    #[test]
+    fn remove_completed_duplicates_keeps_completing_job() {
+        // a Completing job with two Completed duplicates (the old
+        // remove-by-index loop removed the wrong element or panicked when
+        // the last duplicate was the final element) plus unrelated jobs
+        let mut joblist = vec![
+            job("1", JobStatus::Running),
+            job("2", JobStatus::Completing),
+            job("3", JobStatus::Completed),
+            job("2", JobStatus::Completed),
+            job("4", JobStatus::Pending),
+            job("2", JobStatus::Completed),
+        ];
+        remove_completed_duplicates(&mut joblist);
+
+        let ids: Vec<&str> = joblist.iter().map(|j| j.id.as_str()).collect();
+        assert_eq!(ids, vec!["1", "2", "3", "4"]);
+        assert_eq!(joblist[1].status, JobStatus::Completing);
+        // the unrelated Completed job is untouched
+        assert_eq!(joblist[2].status, JobStatus::Completed);
+    }
+
+    #[test]
+    fn remove_completed_duplicates_no_completing_jobs_is_noop() {
+        let mut joblist = vec![
+            job("1", JobStatus::Completed),
+            job("1", JobStatus::Completed),
+            job("2", JobStatus::Running),
+        ];
+        remove_completed_duplicates(&mut joblist);
+        assert_eq!(joblist.len(), 3);
+    }
 }

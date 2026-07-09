@@ -212,9 +212,13 @@ impl JobOverview {
             .title_top(Line::from(refresh_rate).alignment(Alignment::Right));
 
         // update the mouse areas
+        // clip manually constructed rects to the frame area: rendering a
+        // widget into a rect that extends beyond the buffer panics in
+        // ratatui (Buffer::index_of) on narrow terminals
         let mut top_row = *area;
         top_row.height = 1;
         top_row.width = title_len - 2;
+        let top_row = top_row.intersection(f.area());
         self.mouse_areas.joblist_title = top_row;
         let mut joblist_area = block.inner(*area);
 
@@ -222,11 +226,15 @@ impl JobOverview {
 
         // render the squeue command
         let buffer = self.get_squeue_command();
-        let mut squeue_rect = top_row;
+        let mut squeue_rect = *area;
+        squeue_rect.height = 1;
         squeue_rect.width = buffer.len() as u16 + 1;
         squeue_rect.x = title_len - 1;
+        let squeue_rect = squeue_rect.intersection(f.area());
         self.mouse_areas.squeue_command = squeue_rect;
-        self.render_squeue_command(f, &squeue_rect);
+        if !squeue_rect.is_empty() {
+            self.render_squeue_command(f, &squeue_rect);
+        }
 
         if jobs.is_empty() {
             self.render_empty_joblist(f, &joblist_area);
@@ -448,9 +456,11 @@ impl JobOverview {
         let mut log_title = top_row;
         log_title.width = title[3].width() as u16;
         log_title.x += details_title.width + details_title.x + 2;
-        self.mouse_areas.bottom_symbol = symbol;
-        self.mouse_areas.details_title = details_title;
-        self.mouse_areas.log_title = log_title;
+        // clip the manually constructed rects to the containing area so the
+        // mouse areas never extend beyond the rendered region
+        self.mouse_areas.bottom_symbol = symbol.intersection(*area);
+        self.mouse_areas.details_title = details_title.intersection(*area);
+        self.mouse_areas.log_title = log_title.intersection(*area);
     }
 }
 
@@ -727,6 +737,8 @@ impl JobOverview {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
 
     #[test]
     fn test_format_time() {
@@ -735,5 +747,74 @@ mod tests {
         assert_eq!(format_time(&job), "00:00:10");
         job.time = "1-00:00:10".to_string();
         assert_eq!(format_time(&job), "1-00:00:10");
+    }
+
+    fn make_running_job() -> Job {
+        Job::new(
+            "424242",
+            "train_model",
+            JobStatus::Running,
+            "12:34:56",
+            "gpu",
+            2,
+            "/home/user/project",
+            "/home/user/project/run.sh",
+            None,
+        )
+    }
+
+    /// Render the job overview into a test terminal of the given size and
+    /// return the resulting buffer content as a single string.
+    fn render_to_string(width: u16, height: u16, jobs: &JobList) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut overview = JobOverview::new(250, "squeue -u user");
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                overview.render(f, &area, jobs);
+            })
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn test_render_job_overview_with_running_job() {
+        let mut jobs = JobList::new();
+        jobs.jobs.push(make_running_job());
+        jobs.set_index(0).unwrap();
+
+        let content = render_to_string(80, 20, &jobs);
+        assert!(content.contains("SLURM TASK MANAGER"));
+        assert!(content.contains("424242"));
+        assert!(content.contains("train_model"));
+        assert!(content.contains("Running"));
+    }
+
+    /// Regression test: rendering into a terminal narrower than the
+    /// manually constructed squeue command rect must not panic.
+    #[test]
+    fn test_render_narrow_terminal_does_not_panic() {
+        let mut jobs = JobList::new();
+        jobs.jobs.push(make_running_job());
+        jobs.set_index(0).unwrap();
+
+        render_to_string(10, 5, &jobs);
+    }
+
+    #[test]
+    fn test_render_empty_joblist() {
+        let mut jobs = JobList::new();
+        jobs.set_index(0).unwrap();
+
+        let content = render_to_string(80, 20, &jobs);
+        assert!(content.contains("SLURM TASK MANAGER"));
+        assert!(content.contains("No jobs found"));
     }
 }

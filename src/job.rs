@@ -154,3 +154,94 @@ impl Job {
         )
     }
 }
+
+// ====================================================================
+// TESTS
+// ====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn job(id: &str, name: &str, output: Option<&str>) -> Job {
+        Job::new(
+            id,
+            name,
+            JobStatus::Running,
+            "00:00:00",
+            "compute",
+            1,
+            "/tmp",
+            "run.sh",
+            output.map(str::to_string),
+        )
+    }
+
+    #[test]
+    fn test_get_stdout_none_passthrough() {
+        assert_eq!(job("123", "myjob", None).get_stdout(), None);
+    }
+
+    #[test]
+    fn test_get_stdout_no_placeholders_unchanged() {
+        assert_eq!(
+            job("123", "myjob", Some("/logs/output.txt")).get_stdout(),
+            Some("/logs/output.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_stdout_job_id_expansion() {
+        assert_eq!(
+            job("123", "myjob", Some("slurm-%j.out")).get_stdout(),
+            Some("slurm-123.out".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_stdout_job_name_expansion() {
+        assert_eq!(
+            job("123", "myjob", Some("%x.log")).get_stdout(),
+            Some("myjob.log".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_stdout_combined_expansion() {
+        assert_eq!(
+            job("123", "myjob", Some("/logs/%x_%j.out")).get_stdout(),
+            Some("/logs/myjob_123.out".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_stdout_zero_padded_id() {
+        assert_eq!(
+            job("123", "myjob", Some("slurm-%8j.out")).get_stdout(),
+            Some("slurm-00000123.out".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_stdout_padding_width_smaller_than_id() {
+        // the width is a minimum: an id longer than the width is not truncated
+        assert_eq!(
+            job("123456", "myjob", Some("%2j.out")).get_stdout(),
+            Some("123456.out".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_stdout_array_job_id() {
+        // an id with an array task suffix is substituted verbatim, and the
+        // zero padding applies to the whole "id_task" string
+        assert_eq!(
+            job("123_4", "myjob", Some("%j.out")).get_stdout(),
+            Some("123_4.out".to_string())
+        );
+        assert_eq!(
+            job("123_4", "myjob", Some("%8j.out")).get_stdout(),
+            Some("000123_4.out".to_string())
+        );
+    }
+}

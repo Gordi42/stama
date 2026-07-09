@@ -5,7 +5,7 @@ use crate::{
     app::App,
     event::{Event, EventHandler},
     tui::Tui,
-    write_output::write_output_file,
+    write_output::{parse_args, write_output_file},
 };
 
 pub mod app;
@@ -21,6 +21,10 @@ pub mod user_options;
 pub mod write_output;
 
 fn main() -> Result<()> {
+    // Parse the command line arguments first, so that `--help`
+    // (and invalid arguments) exit before the TUI starts.
+    let output_file = parse_args();
+
     let mut app = App::new();
     app.menus.job_overview.set_index(0);
 
@@ -64,7 +68,7 @@ fn main() -> Result<()> {
     // Exit the user interface.
     tui.exit()?;
     if let Some(command) = app.exit_command {
-        write_output_file(&command);
+        write_output_file(output_file.as_deref(), &command);
     }
 
     Ok(())

@@ -76,3 +76,56 @@ impl SallocEntry {
         cmd
     }
 }
+
+// ====================================================================
+//  TESTS
+// ====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn test_start_default_entry() {
+        // a default entry only has a preset name ("new")
+        // and a time limit ("01:00:00")
+        let entry = SallocEntry::new();
+        assert_eq!(entry.start(), "salloc --time=01:00:00 --job-name=new");
+    }
+
+    #[test]
+    fn test_start_all_fields_set() {
+        let entry = SallocEntry {
+            preset_name: "myjob".to_string(),
+            account: "acct".to_string(),
+            partition: "gpu".to_string(),
+            nodes: "2".to_string(),
+            cpus_per_node: "8".to_string(),
+            memory: "16G".to_string(),
+            time_limit: "02:30:00".to_string(),
+            other_options: "--exclusive".to_string(),
+        };
+        assert_eq!(
+            entry.start(),
+            "salloc --account=acct --partition=gpu -N 2 \
+             --ntasks-per-node=8 --mem=16G --time=02:30:00 \
+             --exclusive --job-name=myjob"
+        );
+    }
+
+    #[test]
+    fn test_start_empty_optional_fields() {
+        let entry = SallocEntry {
+            preset_name: String::new(),
+            account: String::new(),
+            partition: String::new(),
+            nodes: String::new(),
+            cpus_per_node: String::new(),
+            memory: String::new(),
+            time_limit: String::new(),
+            other_options: String::new(),
+        };
+        assert_eq!(entry.start(), "salloc");
+    }
+}

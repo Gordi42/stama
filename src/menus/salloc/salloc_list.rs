@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use color_eyre::eyre;
 use serde::{Deserialize, Serialize};
 
@@ -66,36 +68,51 @@ impl<T: Serialize> SallocList<T> {
     //            FILE OPERATIONS
     // =======================================================================
 
-    pub fn save(&self, filename: Option<&str>) -> eyre::Result<()> {
+    /// Compute the default config file path:
+    /// $HOME/{CONFIG_DIR}/{filename or FILENAME}
+    fn default_path(filename: Option<&str>) -> eyre::Result<PathBuf> {
         let home = std::env::var("HOME")?;
-        let config_dir = format!("{}/{}", home, CONFIG_DIR);
-        std::fs::create_dir_all(&config_dir)?;
-        let file = match filename {
-            Some(name) => format!("{}/{}", config_dir, name),
-            None => format!("{}/{}", config_dir, FILENAME),
-        };
+        Ok(PathBuf::from(home)
+            .join(CONFIG_DIR)
+            .join(filename.unwrap_or(FILENAME)))
+    }
+
+    /// Save the list to the default config location
+    pub fn save(&self, filename: Option<&str>) -> eyre::Result<()> {
+        self.save_to_path(&Self::default_path(filename)?)
+    }
+
+    /// Save the list to the given path, creating parent directories
+    /// if necessary
+    pub fn save_to_path(&self, path: &Path) -> eyre::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         let toml_str = toml::to_string(&self)?;
         // write the toml string to the file
         // if the file exists, it should be overwritten
-        std::fs::write(file, toml_str)?;
+        std::fs::write(path, toml_str)?;
         Ok(())
     }
 
+    /// Load the list from the default config location
     pub fn load(filename: Option<&str>) -> eyre::Result<SallocList<T>>
     where
         for<'de> T: Deserialize<'de>,
     {
-        let home = std::env::var("HOME")?;
-        let file = match filename {
-            Some(name) => format!("{}/{}/{}", home, CONFIG_DIR, name),
-            None => format!("{}/{}/{}", home, CONFIG_DIR, FILENAME),
-        };
-        // if the file does not exist, return an empty list
-        if !std::path::Path::new(&file).exists() {
+        Self::load_from_path(&Self::default_path(filename)?)
+    }
+
+    /// Load the list from the given path
+    /// If the file does not exist, return an empty list
+    pub fn load_from_path(path: &Path) -> eyre::Result<SallocList<T>>
+    where
+        for<'de> T: Deserialize<'de>,
+    {
+        if !path.exists() {
             return Ok(SallocList::new());
         }
-        // otherwise, load the list
-        let toml_str = std::fs::read_to_string(file)?;
+        let toml_str = std::fs::read_to_string(path)?;
         let list: SallocList<T> = toml::from_str(&toml_str)?;
         Ok(list)
     }
@@ -131,32 +148,50 @@ mod tests {
 
     #[test]
     fn test_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test_save.toml");
         let mut list: SallocList<SallocEntry> = SallocList::new();
         let entry = SallocEntry::new();
         list.push(entry);
-        list.save(Some("test_save.toml")).unwrap();
-        let home = std::env::var("HOME").unwrap();
-        let file = format!("{}/{}/test_save.toml", home, CONFIG_DIR);
-        assert!(std::path::Path::new(&file).exists());
+        list.save_to_path(&file).unwrap();
+        assert!(file.exists());
     }
 
     #[test]
     fn test_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test_load.toml");
         // Create the list
         let mut list: SallocList<SallocEntry> = SallocList::new();
         let mut entry = SallocEntry::new();
         entry.preset_name = "test".to_string();
         list.push(entry);
         // Save the list
-        list.save(Some("test_load.toml")).unwrap();
+        list.save_to_path(&file).unwrap();
 
         // Load the list
-        let loaded_list: SallocList<SallocEntry> =
-            SallocList::load(Some("test_load.toml")).unwrap();
+        let loaded_list: SallocList<SallocEntry> = SallocList::load_from_path(&file).unwrap();
 
         // Test the loaded list
         assert_eq!(loaded_list.len(), 1);
         let entry = loaded_list.get(0).unwrap();
         assert_eq!(entry.preset_name, "test");
+    }
+
+    #[test]
+    fn test_load_missing_file_returns_empty_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("does_not_exist.toml");
+        let loaded_list: SallocList<SallocEntry> = SallocList::load_from_path(&file).unwrap();
+        assert!(loaded_list.is_empty());
+    }
+
+    #[test]
+    fn test_save_creates_parent_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("nested/dir/list.toml");
+        let list: SallocList<SallocEntry> = SallocList::new();
+        list.save_to_path(&file).unwrap();
+        assert!(file.exists());
     }
 }

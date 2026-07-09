@@ -78,7 +78,12 @@ impl JobList {
             sort_category: SortCategory::Id,
             reverse: false,
             content_updater: ContentUpdater::new(),
-            squeue_command: format!("squeue -u {}", whoami()),
+            squeue_command: match get_user() {
+                Some(user) => format!("squeue -u {}", user),
+                // if the username cannot be determined, show all jobs
+                // instead of filtering by a bogus user name
+                None => "squeue".to_string(),
+            },
         }
     }
 }
@@ -90,15 +95,28 @@ impl Default for JobList {
 }
 
 /// Returns the username of the current user.
-fn whoami() -> String {
-    let command = Command::new("whoami").output();
-    match command {
-        Ok(output) => {
-            let output = String::from_utf8_lossy(&output.stdout);
-            output.to_string()
+///
+/// Tries the `USER` environment variable first and falls back to the
+/// `whoami` command (with trailing whitespace trimmed). Returns `None`
+/// if neither yields a non-empty name; in that case the caller builds
+/// the squeue command without a `-u` filter, which shows all jobs --
+/// the least surprising behavior when the user is unknown.
+fn get_user() -> Option<String> {
+    if let Ok(user) = std::env::var("USER") {
+        let user = user.trim();
+        if !user.is_empty() {
+            return Some(user.to_string());
         }
-        Err(_) => "Error executing whoami".to_string(),
     }
+    if let Ok(output) = Command::new("whoami").output() {
+        if output.status.success() {
+            let user = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !user.is_empty() {
+                return Some(user);
+            }
+        }
+    }
+    None
 }
 
 // ====================================================================
@@ -275,14 +293,20 @@ impl JobList {
         self.sort_raw();
         // try to select the job that was selected before the update
         if let Some(job) = job {
-            self.select_job_by_id(job.id).unwrap_or_else(|_| {
-                // if the job was not found:
-                //  - check if the index is out of bounds
-                //  - if so, set the index to 0
-                if self.selected >= self.len() {
-                    self.set_index(0).unwrap();
-                }
-            });
+            self.reselect_job(job.id);
+        }
+    }
+
+    /// Re-selects the job with the given id after the job list changed.
+    /// If no job with that id exists anymore, the selection is reset to
+    /// the first job. Keeping the old index would silently select a
+    /// different job while still showing the stale details of the old
+    /// one; resetting makes the id-miss explicit and the details are
+    /// refreshed naturally on the next update.
+    fn reselect_job(&mut self, id: String) {
+        if self.select_job_by_id(id).is_err() {
+            // unwrap is safe: set_index(0) always succeeds
+            self.set_index(0).unwrap();
         }
     }
 
@@ -325,31 +349,43 @@ impl JobList {
         // secondary sort is based on the id
         match self.sort_category {
             SortCategory::Id => {
-                self.jobs.sort_by(|a, b| b.id.cmp(&a.id));
+                self.jobs.sort_by(|a, b| compare_job_ids(&b.id, &a.id));
             }
             SortCategory::Name => {
-                self.jobs
-                    .sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+                self.jobs.sort_by(|a, b| {
+                    a.name
+                        .cmp(&b.name)
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
+                });
             }
             SortCategory::Status => {
                 self.jobs.sort_by(|a, b| {
                     a.status
                         .priority()
                         .cmp(&b.status.priority())
-                        .then_with(|| a.id.cmp(&b.id))
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
                 });
             }
             SortCategory::Time => {
-                self.jobs
-                    .sort_by(|a, b| a.time.cmp(&b.time).then_with(|| a.id.cmp(&b.id)));
+                self.jobs.sort_by(|a, b| {
+                    a.time
+                        .cmp(&b.time)
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
+                });
             }
             SortCategory::Partition => {
-                self.jobs
-                    .sort_by(|a, b| a.partition.cmp(&b.partition).then_with(|| a.id.cmp(&b.id)));
+                self.jobs.sort_by(|a, b| {
+                    a.partition
+                        .cmp(&b.partition)
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
+                });
             }
             SortCategory::Nodes => {
-                self.jobs
-                    .sort_by(|a, b| b.nodes.cmp(&a.nodes).then_with(|| a.id.cmp(&b.id)));
+                self.jobs.sort_by(|a, b| {
+                    b.nodes
+                        .cmp(&a.nodes)
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
+                });
             }
         }
         // reverse the list if needed
@@ -377,6 +413,40 @@ impl JobList {
             self.sort_raw();
         }
     }
+}
+
+/// Compares two slurm job ids numerically (ascending).
+///
+/// Plain ids ("9", "10") are compared by their integer value, so "9"
+/// sorts before "10" instead of after it (as a lexicographic comparison
+/// would). Array ids ("123_4") are compared by their numeric
+/// (job, task) pair. Ids that cannot be parsed numerically are compared
+/// as plain strings and ordered after all numeric ids.
+fn compare_job_ids(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (parse_job_id(a), parse_job_id(b)) {
+        (Some(key_a), Some(key_b)) => key_a.cmp(&key_b).then_with(|| a.cmp(b)),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => a.cmp(b),
+    }
+}
+
+/// Parses the numeric components of a slurm job id.
+///
+/// "123" parses to `(123, None)` and the array id "123_4" parses to
+/// `(123, Some(4))`. For array ids with a non-numeric task part (e.g.
+/// the pending range "123_[4-7]") the task component is `None`, which
+/// groups them with their base job id before the individual tasks.
+/// Returns `None` if the (base) job id is not a number.
+fn parse_job_id(id: &str) -> Option<(u64, Option<u64>)> {
+    let (job_part, task_part) = match id.split_once('_') {
+        Some((job, task)) => (job, Some(task)),
+        None => (id, None),
+    };
+    let job: u64 = job_part.parse().ok()?;
+    let task: Option<u64> = task_part.and_then(|task| task.parse().ok());
+    Some((job, task))
 }
 
 // ====================================================================
@@ -540,5 +610,154 @@ mod tests {
         // There are many more tests that could be added here.
         // For example, tests for sorting by different categories.
         // However, this is sufficient for now.
+    }
+
+    /// Creates a job with the given id, status, time and node count.
+    fn create_job(id: &str, status: JobStatus, time: &str, nodes: u32) -> Job {
+        Job::new(
+            id,
+            "job",
+            status,
+            time,
+            "partition1",
+            nodes,
+            "workdir",
+            "command",
+            None,
+        )
+    }
+
+    /// Returns the ids of the jobs in the job list in their current order.
+    fn job_ids(job_list: &JobList) -> Vec<&str> {
+        job_list.jobs.iter().map(|job| job.id.as_str()).collect()
+    }
+
+    #[test]
+    fn test_compare_job_ids() {
+        use std::cmp::Ordering;
+
+        // numeric ids are compared by value, not lexicographically
+        assert_eq!(compare_job_ids("9", "10"), Ordering::Less);
+        assert_eq!(compare_job_ids("10", "9"), Ordering::Greater);
+        assert_eq!(compare_job_ids("10", "10"), Ordering::Equal);
+
+        // array ids are compared by (job, task)
+        assert_eq!(compare_job_ids("123_4", "123_10"), Ordering::Less);
+        assert_eq!(compare_job_ids("123_4", "124_1"), Ordering::Less);
+        // a plain id sorts before its array tasks
+        assert_eq!(compare_job_ids("123", "123_1"), Ordering::Less);
+
+        // non-numeric ids sort after all numeric ids, as strings
+        assert_eq!(compare_job_ids("abc", "999999"), Ordering::Greater);
+        assert_eq!(compare_job_ids("abc", "abd"), Ordering::Less);
+    }
+
+    #[test]
+    fn test_sort_by_id_numeric() {
+        let mut job_list = JobList::new();
+        for id in ["9", "10", "123_10", "2", "123_4", "abc"] {
+            job_list
+                .jobs
+                .push(create_job(id, JobStatus::Running, "00:00:00", 1));
+        }
+
+        // default id sort is descending (newest job first),
+        // with non-numeric ids sorted in front of the numeric ones
+        job_list.sort_raw();
+        assert_eq!(
+            job_ids(&job_list),
+            ["abc", "123_10", "123_4", "10", "9", "2"]
+        );
+
+        // reversed: ascending numeric order, non-numeric ids last
+        job_list.reverse = true;
+        job_list.sort_raw();
+        assert_eq!(
+            job_ids(&job_list),
+            ["2", "9", "10", "123_4", "123_10", "abc"]
+        );
+    }
+
+    #[test]
+    fn test_sort_by_status() {
+        // create_job_list: id "1" Running, id "2" Pending, id "3" Completing
+        let mut job_list = create_job_list();
+        job_list.set_sort_category(SortCategory::Status);
+
+        // ascending by status priority:
+        // Pending (1) < Running (2) < Completing (3)
+        assert_eq!(job_ids(&job_list), ["2", "1", "3"]);
+        // the selection is reset to the first job
+        assert_eq!(job_list.selected, 0);
+    }
+
+    #[test]
+    fn test_sort_by_nodes() {
+        let mut job_list = JobList::new();
+        job_list
+            .jobs
+            .push(create_job("9", JobStatus::Running, "00:00:00", 2));
+        job_list
+            .jobs
+            .push(create_job("10", JobStatus::Running, "00:00:00", 4));
+        job_list
+            .jobs
+            .push(create_job("11", JobStatus::Running, "00:00:00", 2));
+        job_list.set_sort_category(SortCategory::Nodes);
+
+        // descending by node count; ties broken by ascending numeric id
+        assert_eq!(job_ids(&job_list), ["10", "9", "11"]);
+    }
+
+    #[test]
+    fn test_sort_by_time() {
+        let mut job_list = JobList::new();
+        job_list
+            .jobs
+            .push(create_job("9", JobStatus::Running, "00:30:00", 1));
+        job_list
+            .jobs
+            .push(create_job("10", JobStatus::Running, "00:05:00", 1));
+        job_list
+            .jobs
+            .push(create_job("11", JobStatus::Running, "00:05:00", 1));
+        job_list.set_sort_category(SortCategory::Time);
+
+        // ascending by time string; ties broken by ascending numeric id
+        assert_eq!(job_ids(&job_list), ["10", "11", "9"]);
+    }
+
+    #[test]
+    fn test_reselect_job_resets_on_id_miss() {
+        let mut job_list = create_job_list();
+
+        // select the job with id "2" (index 1)
+        job_list.select_job_by_id("2".to_string()).unwrap();
+        assert_eq!(job_list.selected, 1);
+
+        // simulate a refresh where job "2" disappeared but the old
+        // index is still in bounds
+        job_list.jobs.remove(1);
+        assert!(job_list.selected < job_list.len());
+
+        // the id miss must reset the selection to the first job instead
+        // of silently keeping the stale index (which would now point at
+        // a different job)
+        job_list.reselect_job("2".to_string());
+        assert_eq!(job_list.selected, 0);
+
+        // if the job still exists, it stays selected
+        job_list.reselect_job("3".to_string());
+        assert_eq!(job_list.get_job().unwrap().id, "3");
+    }
+
+    #[test]
+    fn test_get_user_has_no_trailing_whitespace() {
+        // in a normal test environment either $USER or `whoami` yields
+        // a username; whatever is returned must be trimmed and non-empty
+        if let Some(user) = get_user() {
+            assert_eq!(user, user.trim());
+            assert!(!user.is_empty());
+        }
     }
 }

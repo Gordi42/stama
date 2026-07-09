@@ -331,27 +331,37 @@ impl App {
     /// This function is called from the main loop when the open_vim
     /// flag is set to true. (see main.rs)
     pub fn open_file_in_editor(&mut self) {
-        let editor = self.user_options.external_editor.as_str();
-        if let Some(path) = &self.vim_path {
+        if let Some(path) = self.vim_path.take() {
+            let editor = self.user_options.external_editor.clone();
             let mut parts = editor.split_whitespace();
             let program = parts.next().unwrap_or(" ");
             let args: Vec<&str> = parts.collect();
 
-            let mut child = Command::new(program)
+            let spawn_result = Command::new(program)
                 .args(args)
-                .arg(path)
+                .arg(&path)
                 .stdin(Stdio::inherit())
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
-                .spawn()
-                .expect("Failed to execute command");
+                .spawn();
 
-            // Wait for the process to finish
-            child.wait().expect("Failed to wait on child");
-
-            self.open_vim = false;
-            self.vim_path = None;
+            // open an error dialog if the editor could not be started
+            match spawn_result {
+                Err(err) => {
+                    let msg = format!("Error opening editor '{}': {}", editor, err);
+                    self.open_error_message(&msg);
+                }
+                Ok(mut child) => {
+                    // Wait for the process to finish
+                    if let Err(err) = child.wait() {
+                        let msg = format!("Error waiting for editor '{}': {}", editor, err);
+                        self.open_error_message(&msg);
+                    }
+                }
+            }
         }
+        self.open_vim = false;
+        self.vim_path = None;
     }
 
     /// Opens the working directory of the selected job in the terminal
@@ -455,7 +465,10 @@ impl App {
             }
             Ok(mut child) => {
                 // Wait for the process to finish
-                child.wait().expect("Failed to wait on child");
+                if let Err(err) = child.wait() {
+                    let msg = format!("Error waiting for salloc command: {}", err);
+                    self.open_error_message(&msg);
+                }
             }
         }
 

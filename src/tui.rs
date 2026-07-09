@@ -1,4 +1,4 @@
-use std::{io, panic};
+use std::{io, panic, sync::Once};
 
 use color_eyre::Result;
 use crossterm::{
@@ -7,6 +7,11 @@ use crossterm::{
 };
 
 pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stderr>>;
+
+/// Guard to make sure the panic hook is only registered once,
+/// even if the terminal interface is entered multiple times
+/// (e.g. after external editor or salloc round trips).
+static PANIC_HOOK: Once = Once::new();
 
 use crate::{app::App, event::EventHandler};
 
@@ -42,11 +47,15 @@ impl Tui {
 
         // Define a custom panic hook to reset the terminal properties.
         // This way, you won't have your terminal messed up if an unexpected error happens.
-        let panic_hook = panic::take_hook();
-        panic::set_hook(Box::new(move |panic| {
-            Self::reset().expect("failed to reset the terminal");
-            panic_hook(panic);
-        }));
+        // The hook is only registered once; the reset is best-effort since
+        // panicking inside a panic hook would abort the process.
+        PANIC_HOOK.call_once(|| {
+            let panic_hook = panic::take_hook();
+            panic::set_hook(Box::new(move |panic| {
+                let _ = Self::reset();
+                panic_hook(panic);
+            }));
+        });
 
         self.terminal.hide_cursor()?;
         self.terminal.clear()?;
@@ -84,5 +93,19 @@ impl Tui {
         self.terminal.show_cursor()?;
         self.events.stop();
         Ok(())
+    }
+}
+
+impl Drop for Tui {
+    /// Best-effort terminal restore.
+    ///
+    /// This makes sure the terminal is reset even if the main loop
+    /// returns early with an error. All operations are safe to call
+    /// even if `exit` has already run (disabling raw mode while not
+    /// in raw mode is a no-op).
+    fn drop(&mut self) {
+        let _ = Self::reset();
+        let _ = self.terminal.show_cursor();
+        self.events.stop();
     }
 }

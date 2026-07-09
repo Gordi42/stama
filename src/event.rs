@@ -7,6 +7,18 @@ use std::{
 use color_eyre::{eyre::eyre, Result};
 use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
 
+/// Minimum tick rate in milliseconds.
+///
+/// Tick rates are clamped to this value to prevent busy-spinning
+/// when a tick rate of 0 (or another very small value) is requested.
+const MIN_TICK_RATE_MS: u64 = 50;
+
+/// Fixed timeout for polling terminal events.
+///
+/// Kept short (and independent of the tick rate) so that the event
+/// thread notices a stop request quickly.
+const POLL_TIMEOUT: Duration = Duration::from_millis(50);
+
 /// Terminal events.
 #[derive(Clone, Copy, Debug)]
 pub enum Event {
@@ -20,18 +32,28 @@ pub enum Event {
     Resize(u16, u16),
 }
 
-/// A pair of a sender and a receiver
+/// A sender, a receiver, and the handle of the event thread.
 ///
-/// The sender send a boolean to a thread to stop it.
+/// The sender sends a boolean to the thread to stop it.
 /// The receiver receives events from the thread.
+/// The handle is used to join the thread when stopping it.
 pub struct Communicator {
     sender: mpsc::Sender<bool>,
     receiver: mpsc::Receiver<Event>,
+    handle: thread::JoinHandle<()>,
 }
 
 impl Communicator {
-    pub fn new(sender: mpsc::Sender<bool>, receiver: mpsc::Receiver<Event>) -> Self {
-        Self { sender, receiver }
+    pub fn new(
+        sender: mpsc::Sender<bool>,
+        receiver: mpsc::Receiver<Event>,
+        handle: thread::JoinHandle<()>,
+    ) -> Self {
+        Self {
+            sender,
+            receiver,
+            handle,
+        }
     }
 }
 
@@ -47,12 +69,12 @@ impl EventHandler {
     pub fn new(tick_rate: u64) -> Self {
         Self {
             communicator: None,
-            tick_rate,
+            tick_rate: tick_rate.max(MIN_TICK_RATE_MS),
         }
     }
 
     pub fn set_tick_rate(&mut self, tick_rate: u64) {
-        self.tick_rate = tick_rate;
+        self.tick_rate = tick_rate.max(MIN_TICK_RATE_MS);
         self.stop();
         self.start();
     }
@@ -70,13 +92,13 @@ impl EventHandler {
 
     /// Stop the event handler thread
     ///
-    /// Sends a signal to the event handling thread, to break out of
-    /// the loop.
+    /// Sends a signal to the event handling thread to break out of
+    /// the loop, and waits for the thread to finish.
     pub fn stop(&mut self) {
-        if let Some(communicator) = &self.communicator {
-            communicator.sender.send(true).unwrap();
+        if let Some(communicator) = self.communicator.take() {
+            let _ = communicator.sender.send(true);
+            let _ = communicator.handle.join();
         }
-        self.communicator = None;
     }
 
     /// Start the event handler thread.
@@ -89,15 +111,22 @@ impl EventHandler {
         let (stop_sender, stop_receiver) = mpsc::channel::<bool>();
         // the sender of the event pipeline and the receiver of the stop
         // pipeline move to the thread
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             let mut last_tick = Instant::now();
             while stop_receiver.try_recv().is_err() {
-                let timeout = tick_rate
-                    .checked_sub(last_tick.elapsed())
-                    .unwrap_or(tick_rate);
+                // Poll with a short fixed timeout so that stop requests
+                // are noticed quickly, independent of the tick rate.
+                let event_available = match event::poll(POLL_TIMEOUT) {
+                    Ok(available) => available,
+                    Err(_) => break,
+                };
 
-                if event::poll(timeout).expect("unable to poll for event") {
-                    let send_result = match event::read().expect("unable to read event") {
+                if event_available {
+                    let crossterm_event = match event::read() {
+                        Ok(crossterm_event) => crossterm_event,
+                        Err(_) => break,
+                    };
+                    let send_result = match crossterm_event {
                         CrosstermEvent::Key(e) => {
                             if e.kind == event::KeyEventKind::Press {
                                 sender.send(Event::Key(e))
@@ -107,13 +136,16 @@ impl EventHandler {
                         }
                         CrosstermEvent::Mouse(e) => sender.send(Event::Mouse(e)),
                         CrosstermEvent::Resize(w, h) => sender.send(Event::Resize(w, h)),
-                        _ => unimplemented!(),
+                        // ignore other events (FocusGained, FocusLost, Paste)
+                        _ => Ok(()),
                     };
                     if send_result.is_err() {
                         break;
                     }
                 }
 
+                // Emit ticks based on accumulated elapsed time, so the
+                // tick rate is independent of the poll timeout.
                 if last_tick.elapsed() >= tick_rate {
                     let send_result = sender.send(Event::Tick);
                     if send_result.is_err() {
@@ -123,7 +155,7 @@ impl EventHandler {
                 }
             }
         });
-        let communicator = Communicator::new(stop_sender, receiver);
+        let communicator = Communicator::new(stop_sender, receiver, handle);
         self.communicator = Some(communicator);
     }
 }

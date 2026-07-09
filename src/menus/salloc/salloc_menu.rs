@@ -159,7 +159,14 @@ impl SallocMenu {
             Some(ind) => ind,
             None => return,
         };
-        self.salloc_list.entries[index] = entry;
+        if index < self.salloc_list.len() {
+            self.salloc_list.entries[index] = entry;
+        } else {
+            // the selection is on the "Create new" row:
+            // editing it creates a new entry. The selected index now
+            // points to the pushed entry, so further edits update it.
+            self.salloc_list.entries.push(entry);
+        }
     }
 
     /// Start the selected salloc entry
@@ -188,7 +195,9 @@ impl SallocMenu {
             return;
         }
         self.salloc_list.entries.remove(index);
-        self.set_index((index as i32).saturating_sub(1));
+        // saturate on the usize so deleting the first entry keeps the
+        // selection at index 0 instead of wrapping to the "Create new" row
+        self.set_index(index.saturating_sub(1) as i32);
     }
 }
 
@@ -429,7 +438,7 @@ impl SallocMenu {
                 // clicking
                 MouseEventKind::Down(MouseButton::Left) => {
                     let mouse_pos = mouse_input.get_position();
-                    let mut rel_y = mouse_pos.y - self.preset_pane.y;
+                    let mut rel_y = mouse_pos.y.saturating_sub(self.preset_pane.y);
                     // adjust for the border
                     rel_y = rel_y.saturating_sub(1);
                     let new_index = rel_y as usize + self.state.offset();
@@ -449,5 +458,104 @@ impl SallocMenu {
                 _ => {}
             }
         }
+    }
+}
+
+// ====================================================================
+//  TESTS
+// ====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+
+    /// Build a menu with the given entries whose selection starts at
+    /// index 0, without touching the config file on disk
+    fn menu_with_entries(entries: Vec<SallocEntry>) -> SallocMenu {
+        let mut menu = SallocMenu::new();
+        menu.salloc_list = SallocList { entries };
+        menu.set_index(0);
+        menu
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// Regression test: on a fresh install (no presets), the selection
+    /// sits on the synthetic "Create new" row (index == entries.len()).
+    /// Pressing Tab and then any key handled by the entry menu used to
+    /// panic with an index out of bounds in `set_entry`.
+    #[test]
+    fn test_input_on_create_new_row_does_not_panic() {
+        let mut menu = menu_with_entries(vec![]);
+        menu.activate();
+        assert_eq!(menu.state.selected(), Some(0));
+        assert!(menu.get_salloc_entry().is_none());
+
+        let mut action = Action::None;
+        // Tab moves the focus to the settings pane
+        menu.input(&mut action, key(KeyCode::Tab));
+        // any key handled by the entry menu triggers `set_entry`,
+        // which used to index out of bounds
+        menu.input(&mut action, key(KeyCode::Down));
+
+        // editing the "Create new" row creates a new entry
+        assert_eq!(menu.salloc_list.len(), 1);
+        assert_eq!(menu.state.selected(), Some(0));
+    }
+
+    /// Calling `set_entry` directly while on the "Create new" row
+    /// pushes a new entry instead of panicking
+    #[test]
+    fn test_set_entry_on_create_new_row_pushes_entry() {
+        let mut menu = menu_with_entries(vec![SallocEntry::new()]);
+        // select the "Create new" row (index == entries.len())
+        menu.set_index(1);
+
+        let mut entry = SallocEntry::new();
+        entry.preset_name = "created".to_string();
+        menu.set_entry(entry);
+
+        assert_eq!(menu.salloc_list.len(), 2);
+        assert_eq!(menu.salloc_list.entries[1].preset_name, "created");
+        // further edits update the pushed entry instead of adding more
+        let mut entry = SallocEntry::new();
+        entry.preset_name = "updated".to_string();
+        menu.set_entry(entry);
+        assert_eq!(menu.salloc_list.len(), 2);
+        assert_eq!(menu.salloc_list.entries[1].preset_name, "updated");
+    }
+
+    /// Regression test: deleting the first preset used to wrap the
+    /// selection to the "Create new" row instead of keeping it on the
+    /// new first entry
+    #[test]
+    fn test_delete_first_entry_keeps_selection_on_first() {
+        let mut first = SallocEntry::new();
+        first.preset_name = "first".to_string();
+        let mut second = SallocEntry::new();
+        second.preset_name = "second".to_string();
+        let mut menu = menu_with_entries(vec![first, second]);
+
+        menu.delete_current_entry();
+
+        assert_eq!(menu.salloc_list.len(), 1);
+        assert_eq!(menu.state.selected(), Some(0));
+        assert_eq!(menu.get_salloc_entry().unwrap().preset_name, "second");
+    }
+
+    /// Deleting the only entry leaves the selection on the
+    /// "Create new" row (the only remaining row)
+    #[test]
+    fn test_delete_only_entry_selects_create_new() {
+        let mut menu = menu_with_entries(vec![SallocEntry::new()]);
+
+        menu.delete_current_entry();
+
+        assert_eq!(menu.salloc_list.len(), 0);
+        assert_eq!(menu.state.selected(), Some(0));
+        assert!(menu.get_salloc_entry().is_none());
     }
 }
