@@ -193,7 +193,7 @@ impl TextField {
             );
         }
 
-        f.render_widget(self.text_area.widget(), chunks[2]);
+        f.render_widget(&self.text_area, chunks[2]);
     }
 }
 

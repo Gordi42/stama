@@ -347,7 +347,7 @@ impl JobOverview {
             textarea.set_cursor_line_style(Style::default());
             textarea.set_cursor_style(Style::default());
         }
-        f.render_widget(textarea.widget(), *area);
+        f.render_widget(&*textarea, *area);
     }
 
     fn render_empty_joblist(&self, f: &mut Frame, area: &Rect) {
