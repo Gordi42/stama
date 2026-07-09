@@ -1,8 +1,10 @@
 use color_eyre::{eyre::eyre, Result};
 use std::process::Command;
+use std::sync::Arc;
 
 use crate::job::Job;
-use crate::update_content::ContentUpdater;
+use crate::scheduler::{Scheduler, SlurmScheduler};
+use crate::update_content::{ContentTick, ContentUpdater, TIMEOUT_ERROR};
 use crate::user_options::UserOptions;
 
 #[derive(PartialEq, Clone, Debug)]
@@ -41,6 +43,19 @@ pub enum JobListAction {
     UpdateSqueueCommand(String),
 }
 
+/// The outcome of a [`JobList::update_jobs`] tick, used by the app to
+/// decide whether an error popup has to be opened.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateStatus {
+    /// The background worker has not delivered new content yet.
+    Pending,
+    /// New content was applied without errors.
+    Success,
+    /// New content was applied (or the worker timed out) and there is
+    /// an error to surface to the user.
+    Error(String),
+}
+
 /// A struct that contains all the informations about running jobs.
 pub struct JobList {
     // The list of jobs.
@@ -68,8 +83,14 @@ pub struct JobList {
 // ====================================================================
 
 impl JobList {
-    /// Creates a new JobList.
+    /// Creates a new JobList using the real Slurm scheduler.
     pub fn new() -> JobList {
+        Self::with_scheduler(Arc::new(SlurmScheduler))
+    }
+
+    /// Creates a new JobList whose background updater executes all
+    /// commands through the given scheduler.
+    pub fn with_scheduler(scheduler: Arc<dyn Scheduler>) -> JobList {
         JobList {
             jobs: Vec::new(),
             selected: 0,
@@ -77,7 +98,7 @@ impl JobList {
             log_tail: String::new(),
             sort_category: SortCategory::Id,
             reverse: false,
-            content_updater: ContentUpdater::new(),
+            content_updater: ContentUpdater::with_scheduler(scheduler),
             squeue_command: match get_user() {
                 Some(user) => format!("squeue -u {}", user),
                 // if the username cannot be determined, show all jobs
@@ -276,25 +297,37 @@ impl JobList {
 
 impl JobList {
     /// Updates the job list.
-    pub fn update_jobs(&mut self, user_options: &UserOptions) {
+    /// Returns whether new content arrived and, if so, whether an error
+    /// has to be surfaced to the user (see [`UpdateStatus`]).
+    pub fn update_jobs(&mut self, user_options: &UserOptions) -> UpdateStatus {
         // get the currently selected job to keep it selected after update
         let job: Option<Job> = self.get_job().cloned();
         let command = self.squeue_command.clone();
         // check if the content updater returns a new job list
-        if let Some(content) = self
+        let status = match self
             .content_updater
             .tick(job.clone(), command, user_options.clone())
         {
-            self.jobs = content.job_list;
-            self.job_details = content.details_text;
-            self.log_tail = content.log_text;
-        }
+            ContentTick::New(content) => {
+                let content = *content;
+                self.jobs = content.job_list;
+                self.job_details = content.details_text;
+                self.log_tail = content.log_text;
+                match content.error {
+                    Some(error) => UpdateStatus::Error(error),
+                    None => UpdateStatus::Success,
+                }
+            }
+            ContentTick::Pending => UpdateStatus::Pending,
+            ContentTick::TimedOut => UpdateStatus::Error(TIMEOUT_ERROR.to_string()),
+        };
         // sort the job list
         self.sort_raw();
         // try to select the job that was selected before the update
         if let Some(job) = job {
             self.reselect_job(job.id);
         }
+        status
     }
 
     /// Re-selects the job with the given id after the job list changed.

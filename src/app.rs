@@ -5,9 +5,10 @@ use ratatui::{
     widgets::Paragraph,
 };
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use crate::job::{Job, JobStatus};
-use crate::joblist::{JobList, JobListAction};
+use crate::joblist::{JobList, JobListAction, UpdateStatus};
 use crate::menus::MenuContainer;
 use crate::menus::{
     confirmation::Confirmation,
@@ -16,6 +17,7 @@ use crate::menus::{
     OpenMenu,
 };
 use crate::mouse_input::MouseInput;
+use crate::scheduler::{Scheduler, SlurmScheduler};
 use crate::user_options::UserOptions;
 
 /// At the end of each tick, the app will handle the action that was set
@@ -77,6 +79,13 @@ pub struct App {
     pub menus: MenuContainer,
     // Mouse input
     pub mouse_input: MouseInput,
+    /// Executes all non-interactive external commands (scancel,
+    /// squeue-for-ssh); the joblist updater shares the same instance.
+    scheduler: Arc<dyn Scheduler>,
+    /// The last job-update error that was shown in the error popup.
+    /// Used to avoid reopening the popup with the same error on every
+    /// refresh tick; reset when an update succeeds.
+    last_update_error: Option<String>,
 }
 
 // ===================================================================
@@ -91,10 +100,16 @@ impl Default for App {
 
 impl App {
     pub fn new() -> Self {
+        Self::with_scheduler(Arc::new(SlurmScheduler))
+    }
+
+    /// Creates the app with an injected scheduler (used by tests to
+    /// run the app against a fake instead of the real Slurm commands).
+    fn with_scheduler(scheduler: Arc<dyn Scheduler>) -> Self {
         // loading user options from config file
         let user_options = UserOptions::load();
-        // create the joblist
-        let mut joblist = JobList::new();
+        // create the joblist (sharing the scheduler with the app)
+        let mut joblist = JobList::with_scheduler(Arc::clone(&scheduler));
         // start the main joblist thread to update the jobs
         joblist.update_jobs(&user_options);
         let menus = MenuContainer::new(&user_options, &joblist);
@@ -113,6 +128,8 @@ impl App {
             joblist,
             menus,
             mouse_input: MouseInput::new(),
+            scheduler,
+            last_update_error: None,
         }
     }
 }
@@ -244,23 +261,11 @@ impl App {
     /// If the user has no permission to kill the job, an error Message
     /// will be shown.
     fn kill_job(&mut self, job: &Job) {
-        // perform the kill command
-        let command_status = Command::new("scancel").arg(&job.id).output();
-        // check if the command was successful. This will check if the command
-        // could be executed. It will not check if the job was actually killed.
-        match command_status {
-            Ok(output) => {
-                // Check the exit status of the command.
-                // If it was not successful, show an error message.
-                if !output.status.success() {
-                    let error_msg = String::from_utf8_lossy(&output.stderr);
-                    self.open_error_message(&format!("Error killing job: {}", error_msg));
-                }
-            }
-            Err(e) => {
-                // If the command could not be executed, show an error message.
-                self.open_error_message(&format!("Error killing job: {}", e));
-            }
+        // A successful return only means the cancel request was
+        // accepted; it does not check whether the job was actually
+        // killed.
+        if let Err(error) = self.scheduler.cancel_job(&job.id) {
+            self.open_error_message(&format!("Error killing job: {}", error));
         }
     }
 
@@ -405,40 +410,22 @@ impl App {
             return;
         }
         // get the node list of the job
-        let com_stat = Command::new("squeue")
-            .arg("-j")
-            .arg(&job.id)
-            .arg("--Format=NodeList")
-            .arg("--noheader")
-            .output();
-        // check if the command was successful
-        match com_stat {
-            Ok(output) => {
-                if !output.status.success() {
-                    // print an error message if the command was not successful
-                    let error_msg = String::from_utf8_lossy(&output.stderr);
-                    self.open_error_message(&format!("Error getting node list: {}", error_msg));
-                    return;
+        match self.scheduler.job_nodes(&job.id) {
+            Ok(nodes) => match nodes.first() {
+                Some(node) => {
+                    // set the exit command to the ssh command and set
+                    // the exit flag to true
+                    self.exit_command = Some(format!("ssh {}", node));
+                    self.should_quit = true;
                 }
-                // format the node list such that only the first node is taken
-                // assume format l[42314-42434], or l[42314,42316,42319]
-                let node_list = String::from_utf8_lossy(&output.stdout);
-                // remove the brackets
-                let node_list = node_list.trim().replace("[", "");
-                // discard everything after the first comma or dash
-                let mut node = node_list.split("-").collect::<Vec<&str>>()[0];
-                node = node.split(",").collect::<Vec<&str>>()[0];
-                // create the ssh command
-                let command = format!("ssh {}", node);
-                // set the exit command to the ssh command and set the
-                // exit flag to true
-                self.exit_command = Some(command);
-                self.should_quit = true;
-            }
-            Err(e) => {
+                None => {
+                    self.open_error_message("Error getting node list: no node found");
+                }
+            },
+            Err(error) => {
                 // print an error message if the squeue command to get the
-                // node list could not be executed
-                self.open_error_message(&format!("Error getting node list: {}", e));
+                // node list failed
+                self.open_error_message(&format!("Error getting node list: {}", error));
             }
         }
     }
@@ -481,9 +468,28 @@ impl App {
 // ===================================================================
 
 impl App {
-    /// Updates the joblist
+    /// Updates the joblist. Errors from the background update (e.g. a
+    /// failing squeue command or a hung worker) are surfaced in the
+    /// error popup.
     pub fn update_jobs(&mut self) {
-        self.joblist.update_jobs(&self.user_options);
+        match self.joblist.update_jobs(&self.user_options) {
+            // nothing new this tick; leave the popup state alone
+            UpdateStatus::Pending => {}
+            // a successful update clears the error memory so that a
+            // recurrence of the same error is shown again
+            UpdateStatus::Success => {
+                self.last_update_error = None;
+            }
+            UpdateStatus::Error(error) => {
+                // only open the popup when the error text changes;
+                // otherwise the same error would reopen the popup on
+                // every refresh tick
+                if self.last_update_error.as_ref() != Some(&error) {
+                    self.open_error_message(&error);
+                    self.last_update_error = Some(error);
+                }
+            }
+        }
     }
 
     /// Handle keyboard input
@@ -530,5 +536,69 @@ impl App {
 
         // render the windows
         self.menus.render(f, &outer_layout[0], &self.joblist);
+    }
+}
+
+// ===================================================================
+//  TESTS
+// ===================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scheduler::{FakeScheduler, SchedulerError};
+
+    /// Creates an app that runs against the given fake scheduler.
+    /// App construction needs no terminal, only the action handling is
+    /// exercised here (no rendering).
+    fn app_with_fake(fake: Arc<FakeScheduler>) -> App {
+        let mut app = App::with_scheduler(fake);
+        // make the kill flow direct instead of opening a confirmation
+        app.user_options.confirm_before_kill = false;
+        app
+    }
+
+    #[test]
+    fn kill_flow_cancels_the_selected_job() {
+        let fake = Arc::new(FakeScheduler::default());
+        let mut app = app_with_fake(Arc::clone(&fake));
+
+        let mut job = Job::new_default();
+        job.id = "4242".to_string();
+        app.action = Action::JobOption(JobActions::Kill(job));
+        app.handle_action();
+
+        // the fake scheduler received exactly one cancel request with
+        // the right job id
+        assert_eq!(
+            *fake.cancelled_jobs.lock().unwrap(),
+            vec!["4242".to_string()]
+        );
+        // a successful cancel opens no error popup
+        assert!(!app.menus.message.should_render);
+    }
+
+    #[test]
+    fn failed_cancel_opens_error_message() {
+        let fake = Arc::new(FakeScheduler {
+            cancel_response: Err(SchedulerError::CommandFailed {
+                program: "scancel".to_string(),
+                stderr: "Access/permission denied".to_string(),
+            }),
+            ..FakeScheduler::default()
+        });
+        let mut app = app_with_fake(Arc::clone(&fake));
+
+        app.action = Action::JobOption(JobActions::KillConfirmed(Job::new_default()));
+        app.handle_action();
+
+        assert_eq!(
+            *fake.cancelled_jobs.lock().unwrap(),
+            vec!["123456".to_string()]
+        );
+        // the error is routed to the error popup
+        assert!(app.menus.message.should_render);
+        assert!(app.menus.message.text.contains("Error killing job"));
+        assert!(app.menus.message.text.contains("Access/permission denied"));
     }
 }

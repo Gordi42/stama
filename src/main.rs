@@ -14,6 +14,7 @@ pub mod job;
 pub mod joblist;
 pub mod menus;
 pub mod mouse_input;
+pub mod scheduler;
 pub mod text_field;
 pub mod tui;
 pub mod update_content;
