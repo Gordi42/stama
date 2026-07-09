@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{layout::Layout, prelude::*, widgets::*};
 
 use crate::app::Action;
+use crate::menus::wrap_index;
 use crate::mouse_input::MouseInput;
 use crate::text_field::{TextField, TextFieldType};
 
@@ -10,7 +11,6 @@ use super::salloc_entry::SallocEntry;
 pub struct EntryMenu {
     pub is_active: bool,
     pub entries: Vec<TextField>,
-    pub is_new: bool,
     pub index: i32,
     pub state: ListState,
     pub offset: u16,
@@ -25,17 +25,7 @@ pub struct EntryMenu {
 
 impl EntryMenu {
     pub fn new(entry: Option<&SallocEntry>) -> Self {
-        let is_new: bool;
-        let entry = match entry {
-            Some(entry) => {
-                is_new = false;
-                entry.clone()
-            }
-            None => {
-                is_new = true;
-                SallocEntry::new()
-            }
-        };
+        let entry = entry.cloned().unwrap_or_default();
 
         let mut entries = vec![
             TextField::new("Preset Name", TextFieldType::Text(entry.preset_name)),
@@ -53,7 +43,6 @@ impl EntryMenu {
         Self {
             is_active: false,
             entries,
-            is_new,
             index: 0,
             state: ListState::default(),
             offset: 0,
@@ -72,14 +61,7 @@ impl EntryMenu {
     pub fn set_index(&mut self, index: i32) {
         self.entries[self.index as usize].active = false;
         self.set_focus(self.index as usize, false);
-        let max_ind = self.entries.len() as i32 - 1;
-        let mut new_index = index;
-        if index > max_ind {
-            new_index = 0;
-        } else if index < 0 {
-            new_index = max_ind;
-        }
-        self.index = new_index;
+        self.index = wrap_index(index as isize, 0, self.entries.len()) as i32;
         self.set_focus(self.index as usize, true);
         self.state.select(Some(self.index as usize));
     }
@@ -188,13 +170,11 @@ impl EntryMenu {
 impl EntryMenu {
     /// Handle user input for the EntryMenu
     /// Returns true if the input was handled, false otherwise.
-    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
+    pub fn input(&mut self, _action: &mut Action, key_event: KeyEvent) -> bool {
         // check if the user is typing in a text field
         let entry = &mut self.entries[self.index as usize];
         if entry.active {
-            {
-                entry.input(key_event, action);
-            }
+            entry.input(key_event);
             return true;
         }
 

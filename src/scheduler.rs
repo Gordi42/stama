@@ -77,10 +77,9 @@ pub trait Scheduler: Send + Sync {
     /// the cancel request was accepted, not that the job is gone.
     fn cancel_job(&self, job_id: &str) -> Result<(), SchedulerError>;
 
-    /// Returns the nodes a job runs on. Slurm reports a compressed node
-    /// list (e.g. "l[42314-42434]"); full expansion is not implemented,
-    /// so currently only the first node is returned -- which is all the
-    /// ssh call site needs.
+    /// Returns the nodes a job runs on, with Slurm's compressed node
+    /// list (e.g. "l[42314-42316],m01") expanded into the individual
+    /// node names (see [`parse_node_list`]).
     fn job_nodes(&self, job_id: &str) -> Result<Vec<String>, SchedulerError>;
 
     /// Returns the last `lines` lines of the file at `path`.
@@ -227,21 +226,114 @@ pub fn sacct_user_filter(squeue_command: &str) -> Vec<String> {
     filter
 }
 
-/// Extracts the first node from Slurm's compressed node list format,
-/// e.g. "l[42314-42434]" or "l[42314,42316]" both yield "l42314".
-/// Returns an empty vector if no node can be derived.
+/// The maximum number of nodes [`parse_node_list`] expands to. Guards
+/// against pathological ranges; no popup or ssh target needs more.
+const MAX_EXPANDED_NODES: usize = 4096;
+
+/// Expands Slurm's compressed node list format into the individual
+/// node names, e.g. "l[42314-42316],m01" yields
+/// ["l42314", "l42315", "l42316", "m01"]. Zero-padded ranges keep
+/// their padding ("nid[001-003]" yields "nid001", ...).
+///
+/// Malformed items are kept verbatim instead of being dropped (so the
+/// caller still sees *something* to report), and the expansion is
+/// capped at [`MAX_EXPANDED_NODES`] entries.
 pub fn parse_node_list(raw: &str) -> Vec<String> {
-    // remove the brackets
-    let cleaned = raw.trim().replace('[', "");
-    // discard everything after the first comma or dash
-    let first = cleaned.split('-').next().unwrap_or("");
-    let first = first.split(',').next().unwrap_or("");
-    let first = first.trim_end_matches(']').trim();
-    if first.is_empty() {
-        Vec::new()
-    } else {
-        vec![first.to_string()]
+    let mut nodes = Vec::new();
+    for expression in split_outside_brackets(raw.trim()) {
+        expand_hostlist_expression(expression, &mut nodes);
+        if nodes.len() >= MAX_EXPANDED_NODES {
+            nodes.truncate(MAX_EXPANDED_NODES);
+            break;
+        }
     }
+    nodes
+}
+
+/// Splits a node list on the commas that separate hostlist
+/// expressions, i.e. the commas outside of "[...]" groups.
+fn split_outside_brackets(raw: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0;
+    for (index, character) in raw.char_indices() {
+        match character {
+            '[' => depth += 1,
+            ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(&raw[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&raw[start..]);
+    parts
+        .into_iter()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
+/// Expands a single hostlist expression like "l[1-3,7]" or "node01"
+/// into `nodes` (stopping at [`MAX_EXPANDED_NODES`]).
+fn expand_hostlist_expression(expression: &str, nodes: &mut Vec<String>) {
+    let (prefix, rest) = match expression.split_once('[') {
+        Some(parts) => parts,
+        // no bracket group: a plain node name
+        None => {
+            nodes.push(expression.to_string());
+            return;
+        }
+    };
+    let (ranges, suffix) = match rest.split_once(']') {
+        Some(parts) => parts,
+        // unbalanced bracket: keep the expression verbatim
+        None => {
+            nodes.push(expression.to_string());
+            return;
+        }
+    };
+    for item in ranges.split(',') {
+        let item = item.trim();
+        if item.is_empty() {
+            continue;
+        }
+        match parse_range(item) {
+            Some((start, end, width)) => {
+                for number in start..=end {
+                    nodes.push(format!(
+                        "{}{:0width$}{}",
+                        prefix,
+                        number,
+                        suffix,
+                        width = width
+                    ));
+                    if nodes.len() >= MAX_EXPANDED_NODES {
+                        return;
+                    }
+                }
+            }
+            // a non-numeric (or reversed) item is kept verbatim
+            None => nodes.push(format!("{}{}{}", prefix, item, suffix)),
+        }
+    }
+}
+
+/// Parses a range item "a-b" (or a single number "a") into
+/// (start, end, zero-padding width). Returns `None` for non-numeric
+/// items and reversed ranges.
+fn parse_range(item: &str) -> Option<(u64, u64, usize)> {
+    let (start_str, end_str) = match item.split_once('-') {
+        Some((start, end)) => (start, end),
+        None => (item, item),
+    };
+    let start: u64 = start_str.parse().ok()?;
+    let end: u64 = end_str.parse().ok()?;
+    if end < start {
+        return None;
+    }
+    Some((start, end, start_str.len()))
 }
 
 // ====================================================================
@@ -704,13 +796,46 @@ mod tests {
     // ----------------------------------------------------------------
 
     #[test]
-    fn parse_node_list_extracts_first_node() {
+    fn parse_node_list_expands_compressed_lists() {
+        // plain node names
         assert_eq!(parse_node_list("node01\n"), vec!["node01"]);
-        assert_eq!(parse_node_list("l[42314-42434]"), vec!["l42314"]);
-        assert_eq!(parse_node_list("l[42314,42316,42319]"), vec!["l42314"]);
         assert_eq!(parse_node_list("l[42314]"), vec!["l42314"]);
+        // ranges and enumerations
+        assert_eq!(
+            parse_node_list("l[42314-42316]"),
+            vec!["l42314", "l42315", "l42316"]
+        );
+        assert_eq!(
+            parse_node_list("l[42314,42316,42319]"),
+            vec!["l42314", "l42316", "l42319"]
+        );
+        // mixed enumerations/ranges and multiple expressions
+        assert_eq!(
+            parse_node_list("gpu[1,3-5],mem1"),
+            vec!["gpu1", "gpu3", "gpu4", "gpu5", "mem1"]
+        );
+        // zero padding is preserved
+        assert_eq!(
+            parse_node_list("nid[001-003]"),
+            vec!["nid001", "nid002", "nid003"]
+        );
+        // empty input
         assert!(parse_node_list("").is_empty());
         assert!(parse_node_list("   \n").is_empty());
+    }
+
+    #[test]
+    fn parse_node_list_handles_malformed_input() {
+        // unbalanced brackets are kept verbatim instead of dropped
+        assert_eq!(parse_node_list("l[42314"), vec!["l[42314"]);
+        // non-numeric and reversed range items are kept verbatim
+        assert_eq!(parse_node_list("n[a-b]"), vec!["na-b"]);
+        assert_eq!(parse_node_list("n[5-3]"), vec!["n5-3"]);
+        // pathological ranges are capped, not expanded endlessly
+        let nodes = parse_node_list("n[0-99999999]");
+        assert_eq!(nodes.len(), 4096);
+        assert_eq!(nodes[0], "n0");
+        assert_eq!(nodes[4095], "n4095");
     }
 
     // ----------------------------------------------------------------

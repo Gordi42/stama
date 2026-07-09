@@ -1,20 +1,19 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
-    layout::{Flex, Layout},
     prelude::*,
     style::{Color, Style},
     widgets::*,
 };
 
 use crate::app::Action;
-use crate::menus::OpenMenu;
+use crate::menus::help::HelpContext;
+use crate::menus::{centered_popup, wrap_index, Menu, OpenMenu, PopupSize};
 use crate::mouse_input::MouseInput;
 use crate::text_field::{TextField, TextFieldType};
 use crate::user_options::UserOptions;
 
 pub struct UserOptionsMenu {
-    pub should_render: bool,
-    pub handle_input: bool,
+    open: bool,
     pub rect: Rect,
     pub entries: Vec<TextField>,
     pub index: i32,
@@ -53,8 +52,7 @@ impl UserOptionsMenu {
         ];
 
         Self {
-            should_render: false,
-            handle_input: false,
+            open: false,
             rect: Rect::default(),
             entries,
             index: 0,
@@ -109,26 +107,17 @@ impl UserOptionsMenu {
     }
 
     pub fn activate(&mut self) {
-        self.should_render = true;
-        self.handle_input = true;
+        self.open = true;
     }
 
     pub fn deactivate(&mut self) {
-        self.should_render = false;
-        self.handle_input = false;
+        self.open = false;
         self.save();
     }
 
     pub fn set_index(&mut self, index: i32) {
         self.set_focus(self.index as usize, false);
-        let max_ind = self.entries.len() as i32 - 1;
-        let mut new_index = index;
-        if index > max_ind {
-            new_index = 0;
-        } else if index < 0 {
-            new_index = max_ind;
-        }
-        self.index = new_index;
+        self.index = wrap_index(index as isize, 0, self.entries.len()) as i32;
         self.set_focus(self.index as usize, true);
         self.state.select(Some(self.index as usize));
     }
@@ -147,25 +136,16 @@ impl UserOptionsMenu {
 }
 
 // ====================================================================
-//  RENDERING
+//  MENU TRAIT (RENDERING + INPUT)
 // ====================================================================
 
-impl UserOptionsMenu {
-    pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
-        if !self.should_render {
-            return;
-        }
+impl Menu for UserOptionsMenu {
+    fn is_open(&self) -> bool {
+        self.open
+    }
 
-        let window_width = f.area().width;
-        let text_area_width = (0.8 * (window_width as f32)) as u16;
-
-        let window_height = f.area().height;
-        let text_area_height = (0.8 * (window_height as f32)) as u16;
-
-        let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
-        let vertical = Layout::vertical([text_area_height]).flex(Flex::Center);
-        let [rect] = vertical.areas(f.area());
-        let [rect] = horizontal.areas(rect);
+    fn render(&mut self, f: &mut Frame, _area: &Rect) {
+        let rect = centered_popup(f.area(), PopupSize::Fraction(0.8), PopupSize::Fraction(0.8));
         self.rect = rect;
         self.max_height = rect.height.saturating_sub(2);
 
@@ -208,25 +188,16 @@ impl UserOptionsMenu {
             entry.render(f, rect);
         }
     }
-}
 
-// ====================================================================
-//  USER INPUT
-// ====================================================================
-
-impl UserOptionsMenu {
     /// Handle user input for the user settings window
-    /// Always returns true (input is always handled)
-    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
-        if !self.handle_input {
-            return false;
-        }
-
+    /// Always returns true (input is always consumed)
+    fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
         // check if the user is typing in a text field
         let entry = &mut self.entries[self.index as usize];
         if entry.active {
-            {
-                entry.input(key_event, action);
+            // a submitted value updates the user options
+            if entry.input(key_event) {
+                *action = Action::UpdateUserOptions;
             }
             return true;
         }
@@ -247,25 +218,15 @@ impl UserOptionsMenu {
                 *action = Action::UpdateUserOptions;
             }
             KeyCode::Char('?') => {
-                *action = Action::OpenMenu(OpenMenu::Help(3));
+                *action = Action::OpenMenu(OpenMenu::Help(HelpContext::StamaSettings));
             }
 
             _ => {}
         }
         true
     }
-}
 
-// ====================================================================
-//  MOUSE INPUT
-// ====================================================================
-
-impl UserOptionsMenu {
-    pub fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
-        if !self.handle_input {
-            return;
-        }
-
+    fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
         if let Some(mouse_event_kind) = mouse_input.kind() {
             // check if the user is editing a text field
             let entry = &mut self.entries[self.index as usize];

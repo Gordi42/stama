@@ -1,17 +1,16 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
-    layout::{Flex, Layout},
     prelude::*,
     style::{Color, Style},
     widgets::*,
 };
 
 use crate::app::Action;
+use crate::menus::{centered_popup, Menu, PopupSize};
 use crate::mouse_input::MouseInput;
 
 pub struct Confirmation {
-    pub should_render: bool,
-    pub handle_input: bool,
+    open: bool,
     pub action: Action,
     pub select_yes: bool,
     pub message: String,
@@ -27,8 +26,7 @@ pub struct Confirmation {
 impl Confirmation {
     pub fn new(message: &str, action: Action) -> Self {
         Self {
-            should_render: true,
-            handle_input: true,
+            open: true,
             action,
             select_yes: false,
             message: message.to_string(),
@@ -40,8 +38,7 @@ impl Confirmation {
 
     pub fn new_disabled() -> Self {
         Self {
-            should_render: false,
-            handle_input: false,
+            open: false,
             action: Action::None,
             select_yes: false,
             message: "".to_string(),
@@ -58,14 +55,12 @@ impl Confirmation {
 
 impl Confirmation {
     pub fn confirm(&mut self, action: &mut Action) {
-        self.should_render = false;
-        self.handle_input = false;
+        self.open = false;
         *action = self.action.clone();
     }
 
     pub fn deny(&mut self) {
-        self.should_render = false;
-        self.handle_input = false;
+        self.open = false;
     }
 
     pub fn toggle(&mut self) {
@@ -82,27 +77,16 @@ impl Confirmation {
 }
 
 // ====================================================================
-//  RENDERING
+//  MENU TRAIT (RENDERING + INPUT)
 // ====================================================================
 
-impl Confirmation {
-    pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
-        if !self.should_render {
-            return;
-        }
+impl Menu for Confirmation {
+    fn is_open(&self) -> bool {
+        self.open
+    }
 
-        let window_width = f.area().width;
-        let mut text_area_width = 40;
-        text_area_width = text_area_width.min(window_width);
-
-        let window_height = f.area().height;
-        let mut text_area_height = 9;
-        text_area_height = text_area_height.min(window_height);
-
-        let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
-        let vertical = Layout::vertical([text_area_height]).flex(Flex::Center);
-        let [rect] = vertical.areas(f.area());
-        let [rect] = horizontal.areas(rect);
+    fn render(&mut self, f: &mut Frame, _area: &Rect) {
+        let rect = centered_popup(f.area(), PopupSize::Fixed(40), PopupSize::Fixed(9));
         self.confirm_rect = rect;
 
         // clear the area
@@ -188,20 +172,10 @@ impl Confirmation {
         f.render_widget(yes_button, buttons_layout[1]);
         f.render_widget(no_button, buttons_layout[3]);
     }
-}
 
-// ====================================================================
-//  USER INPUT
-// ====================================================================
-
-impl Confirmation {
-    /// Handle user input for the message window
-    /// Always returns true (input is always handled)
-    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
-        if !self.handle_input {
-            return false;
-        }
-
+    /// Handle user input for the confirmation window
+    /// Always returns true (input is always consumed)
+    fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
         match key_event.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('n') => {
                 self.deny();
@@ -227,18 +201,8 @@ impl Confirmation {
         }
         true
     }
-}
 
-// ====================================================================
-//  MOUSE INPUT
-// ====================================================================
-
-impl Confirmation {
-    pub fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
-        if !self.handle_input {
-            return;
-        }
-
+    fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
         if let Some(mouse_event_kind) = mouse_input.kind() {
             if let MouseEventKind::Down(MouseButton::Left) = mouse_event_kind {
                 if !self.confirm_rect.contains(mouse_input.get_position()) {

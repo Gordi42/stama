@@ -1,12 +1,12 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
-    layout::{Flex, Layout},
     prelude::*,
     style::{Color, Style},
     widgets::*,
 };
 
 use crate::app::Action;
+use crate::menus::{centered_popup, Menu, PopupSize};
 use crate::mouse_input::MouseInput;
 
 // ====================================================================
@@ -14,6 +14,28 @@ use crate::mouse_input::MouseInput;
 // ====================================================================
 // # Category
 //   - short | long
+
+/// The menu from which the help menu was opened. The help menu scrolls
+/// the matching category to the top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpContext {
+    JobOverview,
+    JobActions,
+    AllocationMenu,
+    StamaSettings,
+}
+
+impl HelpContext {
+    /// The index of the matching category in `HelpMenu::categories`
+    fn category_index(self) -> usize {
+        match self {
+            HelpContext::JobOverview => 0,
+            HelpContext::JobActions => 1,
+            HelpContext::AllocationMenu => 2,
+            HelpContext::StamaSettings => 3,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct HelpEntry {
@@ -47,8 +69,7 @@ impl HelpCategory {
 
 #[derive(Debug, Clone)]
 pub struct HelpMenu {
-    pub should_render: bool,
-    pub handle_input: bool,
+    open: bool,
     pub rect: Rect,
     pub categories: Vec<HelpCategory>,
     pub offset: usize,
@@ -126,8 +147,7 @@ impl HelpMenu {
         ];
 
         Self {
-            should_render: false,
-            handle_input: false,
+            open: false,
             rect: Rect::default(),
             categories,
             offset: 0,
@@ -140,27 +160,19 @@ impl HelpMenu {
 // ====================================================================
 
 impl HelpMenu {
-    pub fn open(&mut self, _selected_category: usize) {
-        self.should_render = true;
-        self.handle_input = true;
-        // set offset
-        let category_lengths = self
+    pub fn open(&mut self, context: HelpContext) {
+        self.open = true;
+        // scroll the category of the calling menu to the top
+        self.offset = self
             .categories
             .iter()
+            .take(context.category_index())
             .map(|c| c.entries.len())
-            .collect::<Vec<usize>>();
-        self.offset = 0;
-        for (index, length) in category_lengths.iter().enumerate() {
-            if index == _selected_category {
-                break;
-            }
-            self.offset += length;
-        }
+            .sum();
     }
 
     pub fn close(&mut self) {
-        self.should_render = false;
-        self.handle_input = false;
+        self.open = false;
     }
 
     pub fn scroll_down(&mut self) {
@@ -180,25 +192,22 @@ impl HelpMenu {
 }
 
 // ====================================================================
-//  RENDERING
+//  MENU TRAIT (RENDERING + INPUT)
 // ====================================================================
 
-impl HelpMenu {
-    pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
-        if !self.should_render {
-            return;
-        }
+impl Menu for HelpMenu {
+    fn is_open(&self) -> bool {
+        self.open
+    }
 
-        let window_width = f.area().width;
-        let text_area_width = (0.8 * (window_width as f32)) as u16;
+    fn render(&mut self, f: &mut Frame, _area: &Rect) {
+        let text_area_width = (0.8 * (f.area().width as f32)) as u16;
 
-        let window_height = f.area().height;
-        let text_area_height = (1.0 * (window_height as f32)) as u16;
-
-        let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
-        let vertical = Layout::vertical([text_area_height]).flex(Flex::Center);
-        let [rect] = vertical.areas(f.area());
-        let [rect] = horizontal.areas(rect);
+        let rect = centered_popup(
+            f.area(),
+            PopupSize::Fixed(text_area_width),
+            PopupSize::Fraction(1.0),
+        );
         self.rect = rect;
 
         // clear the rect
@@ -282,20 +291,10 @@ impl HelpMenu {
             }
         }
     }
-}
 
-// ====================================================================
-//  USER INPUT
-// ====================================================================
-
-impl HelpMenu {
-    /// Handle user input for the message window
-    /// Always returns true (input is always handled)
-    pub fn input(&mut self, _action: &mut Action, _key_event: KeyEvent) -> bool {
-        if !self.handle_input {
-            return false;
-        }
-
+    /// Handle user input for the help window
+    /// Always returns true (input is always consumed)
+    fn input(&mut self, _action: &mut Action, _key_event: KeyEvent) -> bool {
         match _key_event.code {
             KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('?') => {
                 self.close();
@@ -311,25 +310,14 @@ impl HelpMenu {
 
         true
     }
-}
 
-// ====================================================================
-//  MOUSE INPUT
-// ====================================================================
-
-impl HelpMenu {
-    pub fn mouse_input(&mut self, _action: &mut Action, mouse_input: &mut MouseInput) {
-        if !self.handle_input {
-            return;
-        }
-
+    fn mouse_input(&mut self, _action: &mut Action, mouse_input: &mut MouseInput) {
         if let Some(mouse_event_kind) = mouse_input.kind() {
             match mouse_event_kind {
                 MouseEventKind::Down(MouseButton::Left)
                     if !self.rect.contains(mouse_input.get_position()) =>
                 {
-                    self.should_render = false;
-                    self.handle_input = false;
+                    self.close();
                 }
                 MouseEventKind::ScrollDown => {
                     self.scroll_down();

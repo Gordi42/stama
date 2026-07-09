@@ -1,10 +1,17 @@
 use crossterm::event::{KeyEvent, MouseEvent};
-use ratatui::{layout::Rect, Frame};
+use ratatui::{
+    layout::{Flex, Layout, Rect},
+    Frame,
+};
 
 use crate::app::Action;
 use crate::menus::{
-    confirmation::Confirmation, help::HelpMenu, job_actions::JobActionsMenu,
-    job_overview::JobOverview, message::Message, user_options_menu::UserOptionsMenu,
+    confirmation::Confirmation,
+    help::{HelpContext, HelpMenu},
+    job_actions::JobActionsMenu,
+    job_overview::JobOverview,
+    message::Message,
+    user_options_menu::UserOptionsMenu,
 };
 use crate::mouse_input::MouseInput;
 use crate::{joblist::JobList, user_options::UserOptions};
@@ -21,16 +28,103 @@ pub mod user_options_menu;
 
 #[derive(Debug, Clone)]
 pub enum OpenMenu {
-    JobOverview,
     UserOptions,
-    Help(usize),
+    Help(HelpContext),
     Salloc,
     JobActions,
     Message(message::Message),
 }
 
-/// The Menu Container that contains all menus and parses
-/// rendering and keyboard events to corresponding menus
+// ===================================================================
+//  MENU TRAIT
+// ===================================================================
+
+/// The common interface of all popup menus.
+///
+/// A menu is either open or closed: an open menu is rendered and
+/// receives keyboard and mouse input, a closed one is skipped by the
+/// `MenuContainer`. The container only calls `render`, `input` and
+/// `mouse_input` while the menu is open, so implementations need no
+/// "am I open?" guards of their own.
+pub trait Menu {
+    /// Whether the menu is currently open
+    fn is_open(&self) -> bool;
+
+    /// Render the menu. Only called while the menu is open.
+    fn render(&mut self, f: &mut Frame, area: &Rect);
+
+    /// Handle a key event. Only called while the menu is open.
+    /// Returns true if the event was consumed (menus below and the
+    /// job overview then do not see it).
+    fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool;
+
+    /// Handle a mouse event. Only called while the menu is open.
+    /// Menus mark the event as handled via `MouseInput` so that the
+    /// menus below them ignore it.
+    fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput);
+}
+
+// ===================================================================
+//  SHARED HELPERS
+// ===================================================================
+
+/// The size of one popup dimension
+#[derive(Debug, Clone, Copy)]
+pub enum PopupSize {
+    /// A fraction of the frame dimension (0.0..=1.0)
+    Fraction(f32),
+    /// A fixed number of terminal cells (clipped to the frame)
+    Fixed(u16),
+}
+
+impl PopupSize {
+    /// Resolve the size to a cell count, never exceeding `total`
+    fn resolve(self, total: u16) -> u16 {
+        match self {
+            PopupSize::Fraction(fraction) => (fraction * total as f32) as u16,
+            PopupSize::Fixed(cells) => cells.min(total),
+        }
+    }
+}
+
+/// Compute a centered popup rect inside the given frame area.
+/// The returned rect never extends beyond the frame area, so it is
+/// safe to render into even on very narrow terminals. The caller
+/// renders `Clear` plus its own block into the rect.
+pub fn centered_popup(frame_area: Rect, width: PopupSize, height: PopupSize) -> Rect {
+    let width = width.resolve(frame_area.width);
+    let height = height.resolve(frame_area.height);
+    let vertical = Layout::vertical([height]).flex(Flex::Center);
+    let horizontal = Layout::horizontal([width]).flex(Flex::Center);
+    let [rect] = vertical.areas(frame_area);
+    let [rect] = horizontal.areas(rect);
+    rect
+}
+
+/// Wrap-around index arithmetic shared by the list menus: stepping
+/// past the last entry wraps to the first and vice versa. A jump
+/// beyond either end also wraps (a click below the last row selects
+/// the first entry, matching the previous per-menu implementations).
+///
+/// `len` is the number of selectable rows; a menu with a synthetic
+/// trailing row (like the salloc "Create new" row) passes `len + 1`.
+pub fn wrap_index(current: isize, delta: isize, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    let max = len as isize - 1;
+    let target = current + delta;
+    if target > max {
+        0
+    } else if target < 0 {
+        max as usize
+    } else {
+        target as usize
+    }
+}
+
+/// The Menu Container that contains all menus and dispatches
+/// rendering, keyboard and mouse events to them
 pub struct MenuContainer {
     /// The Job Overview (Main Task Manager Window)
     pub job_overview: JobOverview,
@@ -73,34 +167,39 @@ impl MenuContainer {
 // ===================================================================
 
 impl MenuContainer {
+    /// The popup menus in front-to-back order (the most modal first).
+    /// Rendering, keyboard input and mouse input all derive from this
+    /// single ordering, so keys and clicks always go to the same menu.
+    fn popups_front_to_back(&mut self) -> [&mut dyn Menu; 6] {
+        [
+            &mut self.confirmation,
+            &mut self.message,
+            &mut self.help_menu,
+            &mut self.user_options_menu,
+            &mut self.salloc_menu,
+            &mut self.job_actions_menu,
+        ]
+    }
+
     /// Opens a selected menu
     pub fn activate_menu(&mut self, open_menu: OpenMenu, joblist: &JobList) {
         match open_menu {
-            OpenMenu::JobOverview => {
-                self.open_job_overview();
-            }
             OpenMenu::JobActions => {
                 self.open_job_action(joblist);
             }
             OpenMenu::Salloc => {
-                self.open_salloc_menu();
+                self.salloc_menu.activate();
             }
             OpenMenu::UserOptions => {
                 self.user_options_menu.activate();
             }
             OpenMenu::Message(message) => {
-                self.open_message(message.clone());
+                self.message = message;
             }
-            OpenMenu::Help(selected_category) => {
-                self.open_help_menu(selected_category);
+            OpenMenu::Help(context) => {
+                self.help_menu.open(context);
             }
         }
-    }
-
-    /// Opens the job overview menu
-    /// This is the main menu that shows all the jobs
-    fn open_job_overview(&mut self) {
-        self.message = Message::new("Opening job overview not implemented");
     }
 
     /// Opens the job actions menu
@@ -116,21 +215,6 @@ impl MenuContainer {
             }
         }
     }
-
-    /// Opens the job allocation menu (not implemented)
-    fn open_salloc_menu(&mut self) {
-        self.salloc_menu.activate();
-    }
-
-    /// Opens the help menu with a focus on the selected category
-    fn open_help_menu(&mut self, selected_category: usize) {
-        self.help_menu.open(selected_category);
-    }
-
-    /// Opens a message dialog with the given message
-    fn open_message(&mut self, message: Message) {
-        self.message = message;
-    }
 }
 
 // ===================================================================
@@ -140,15 +224,15 @@ impl MenuContainer {
 impl MenuContainer {
     /// Render all menus
     pub fn render(&mut self, f: &mut Frame, area: &Rect, joblist: &JobList) {
-        // render from back to front
-        // so that the frontmost menu is rendered last
+        // the job overview is the always-visible base screen
         self.job_overview.render(f, area, joblist);
-        self.job_actions_menu.render(f, area);
-        self.salloc_menu.render(f, area);
-        self.user_options_menu.render(f, area);
-        self.help_menu.render(f, area);
-        self.message.render(f, area);
-        self.confirmation.render(f, area);
+        // render the popups from back to front so that the
+        // frontmost menu is drawn last (on top)
+        for menu in self.popups_front_to_back().into_iter().rev() {
+            if menu.is_open() {
+                menu.render(f, area);
+            }
+        }
     }
 }
 
@@ -159,32 +243,15 @@ impl MenuContainer {
 impl MenuContainer {
     /// Handle keyboard input for all menus
     pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) {
-        // keep track of whether the input has been handled
-        // so that we can stop processing input if it has
-        let mut input_handled = false;
-        // pass the key event to the app menus
-        // from front to back
-        if !input_handled {
-            input_handled = self.confirmation.input(action, key_event);
+        // pass the key event to the open popups from front to back;
+        // the first menu that consumes it wins
+        for menu in self.popups_front_to_back() {
+            if menu.is_open() && menu.input(action, key_event) {
+                return;
+            }
         }
-        if !input_handled {
-            input_handled = self.message.input(action, key_event);
-        }
-        if !input_handled {
-            input_handled = self.help_menu.input(action, key_event);
-        }
-        if !input_handled {
-            input_handled = self.user_options_menu.input(action, key_event);
-        }
-        if !input_handled {
-            input_handled = self.salloc_menu.input(action, key_event);
-        }
-        if !input_handled {
-            input_handled = self.job_actions_menu.input(action, key_event);
-        }
-        if !input_handled {
-            self.job_overview.input(action, key_event);
-        }
+        // fall through to the base screen
+        self.job_overview.input(action, key_event);
     }
 
     /// Handle mouse input for all menus
@@ -198,14 +265,167 @@ impl MenuContainer {
         mouse_input.handled = false;
         mouse_input.event = Some(mouse_event);
 
-        // pass the mouse event to the app menus
-        // from front to back
-        self.message.mouse_input(action, mouse_input);
-        self.confirmation.mouse_input(action, mouse_input);
-        self.help_menu.mouse_input(action, mouse_input);
-        self.user_options_menu.mouse_input(action, mouse_input);
-        self.salloc_menu.mouse_input(action, mouse_input);
-        self.job_actions_menu.mouse_input(action, mouse_input);
+        // pass the mouse event to the open popups from front to back
+        // (the same order as keyboard input); a menu that handles the
+        // event marks it as handled so the menus below ignore it
+        for menu in self.popups_front_to_back() {
+            if menu.is_open() {
+                menu.mouse_input(action, mouse_input);
+            }
+        }
         self.job_overview.mouse_input(action, mouse_input);
+    }
+}
+
+// ===================================================================
+//  TESTS
+// ===================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+
+    // ----------------------------------------------------------------
+    //  wrap_index
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn test_wrap_index_steps_within_bounds() {
+        assert_eq!(wrap_index(0, 1, 5), 1);
+        assert_eq!(wrap_index(3, -1, 5), 2);
+        assert_eq!(wrap_index(2, 0, 5), 2);
+    }
+
+    #[test]
+    fn test_wrap_index_wraps_at_the_ends() {
+        // stepping past the last entry wraps to the first
+        assert_eq!(wrap_index(4, 1, 5), 0);
+        // stepping before the first entry wraps to the last
+        assert_eq!(wrap_index(0, -1, 5), 4);
+    }
+
+    #[test]
+    fn test_wrap_index_jump_beyond_the_ends_wraps() {
+        // an absolute jump beyond the end selects the first entry
+        // (e.g. a click below the last row)
+        assert_eq!(wrap_index(17, 0, 5), 0);
+        assert_eq!(wrap_index(-3, 0, 5), 4);
+    }
+
+    #[test]
+    fn test_wrap_index_empty_list() {
+        assert_eq!(wrap_index(0, 1, 0), 0);
+        assert_eq!(wrap_index(0, -1, 0), 0);
+    }
+
+    #[test]
+    fn test_wrap_index_with_synthetic_trailing_row() {
+        // a menu with a synthetic trailing row passes len + 1:
+        // index == len is a valid selection
+        assert_eq!(wrap_index(2, 1, 3 + 1), 3);
+        assert_eq!(wrap_index(3, 1, 3 + 1), 0);
+        assert_eq!(wrap_index(0, -1, 3 + 1), 3);
+    }
+
+    // ----------------------------------------------------------------
+    //  centered_popup
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn test_centered_popup_is_centered() {
+        let frame = Rect::new(0, 0, 100, 50);
+        let rect = centered_popup(frame, PopupSize::Fixed(40), PopupSize::Fixed(10));
+        assert_eq!(rect, Rect::new(30, 20, 40, 10));
+    }
+
+    #[test]
+    fn test_centered_popup_fraction() {
+        let frame = Rect::new(0, 0, 100, 50);
+        let rect = centered_popup(frame, PopupSize::Fraction(0.8), PopupSize::Fraction(0.8));
+        assert_eq!(rect.width, 80);
+        assert_eq!(rect.height, 40);
+    }
+
+    #[test]
+    fn test_centered_popup_clips_to_narrow_frame() {
+        // a fixed size larger than the frame must be clipped so that
+        // rendering into the rect cannot panic on narrow terminals
+        let frame = Rect::new(0, 0, 10, 5);
+        let rect = centered_popup(frame, PopupSize::Fixed(40), PopupSize::Fixed(9));
+        assert!(rect.width <= frame.width);
+        assert!(rect.height <= frame.height);
+        assert_eq!(rect.intersection(frame), rect);
+    }
+
+    // ----------------------------------------------------------------
+    //  MenuContainer input routing
+    // ----------------------------------------------------------------
+
+    fn container() -> MenuContainer {
+        MenuContainer::new(&UserOptions::default(), &JobList::new())
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn left_click(column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    /// Regression test for the key/mouse ordering inconsistency: with
+    /// both the confirmation and the message popup open, a key event
+    /// must go to the confirmation (the most modal menu) and leave the
+    /// message untouched.
+    #[test]
+    fn test_key_input_goes_to_confirmation_before_message() {
+        let mut container = container();
+        container.confirmation = Confirmation::new("Quit?", Action::ConfirmedQuit);
+        container.message = Message::new("some message");
+
+        let mut action = Action::None;
+        container.input(&mut action, key(KeyCode::Esc));
+
+        // Esc denies the confirmation; the message stays open
+        assert!(!container.confirmation.is_open());
+        assert!(container.message.is_open());
+    }
+
+    /// Regression test for the key/mouse ordering inconsistency: a
+    /// mouse event must go to the confirmation first as well (it used
+    /// to go to the message while key events went to the confirmation).
+    #[test]
+    fn test_mouse_input_goes_to_confirmation_before_message() {
+        let mut container = container();
+        container.confirmation = Confirmation::new("Quit?", Action::ConfirmedQuit);
+        container.message = Message::new("some message");
+
+        let mut action = Action::None;
+        let mut mouse_input = MouseInput::new();
+        // the popups were never rendered, so their rects are empty and
+        // the click lands outside of them: it closes the confirmation
+        container.mouse_input(&mut action, &mut mouse_input, left_click(0, 0));
+
+        assert!(!container.confirmation.is_open());
+        assert!(container.message.is_open());
+    }
+
+    /// Confirming the dialog with 'y' emits the stored action
+    #[test]
+    fn test_confirmation_key_confirm_emits_action() {
+        let mut container = container();
+        container.confirmation = Confirmation::new("Quit?", Action::ConfirmedQuit);
+
+        let mut action = Action::None;
+        container.input(&mut action, key(KeyCode::Char('y')));
+
+        assert!(matches!(action, Action::ConfirmedQuit));
+        assert!(!container.confirmation.is_open());
     }
 }

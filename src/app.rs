@@ -409,7 +409,11 @@ impl App {
             self.open_error_message("Job not running");
             return;
         }
-        // get the node list of the job
+        // get the node list of the job; the scheduler expands Slurm's
+        // compressed node list, so `nodes` contains every node of the
+        // job. For now the first node is used; a node-selection popup
+        // (offering the full list when nodes.len() > 1) can hook in
+        // here once the Menu trait refactor lands.
         match self.scheduler.job_nodes(&job.id) {
             Ok(nodes) => match nodes.first() {
                 Some(node) => {
@@ -442,7 +446,7 @@ impl App {
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
-            .spawn(); //.expect("Failed to execute command");
+            .spawn();
 
         // open a error dialog if the command could not be executed
         match output_status {
@@ -546,6 +550,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::menus::Menu;
     use crate::scheduler::{FakeScheduler, SchedulerError};
 
     /// Creates an app that runs against the given fake scheduler.
@@ -575,7 +580,7 @@ mod tests {
             vec!["4242".to_string()]
         );
         // a successful cancel opens no error popup
-        assert!(!app.menus.message.should_render);
+        assert!(!app.menus.message.is_open());
     }
 
     #[test]
@@ -597,7 +602,7 @@ mod tests {
             vec!["123456".to_string()]
         );
         // the error is routed to the error popup
-        assert!(app.menus.message.should_render);
+        assert!(app.menus.message.is_open());
         assert!(app.menus.message.text.contains("Error killing job"));
         assert!(app.menus.message.text.contains("Access/permission denied"));
     }

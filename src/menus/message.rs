@@ -1,12 +1,12 @@
 use crossterm::event::{KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
-    layout::{Flex, Layout},
     prelude::*,
     style::{Color, Style},
     widgets::*,
 };
 
 use crate::app::Action;
+use crate::menus::{centered_popup, Menu, PopupSize};
 use crate::mouse_input::MouseInput;
 
 #[derive(Debug, Clone, Copy)]
@@ -18,8 +18,7 @@ pub enum MessageKind {
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    pub should_render: bool,
-    pub handle_input: bool,
+    open: bool,
     pub text: String,
     pub rect: Rect,
     pub kind: MessageKind,
@@ -32,8 +31,7 @@ pub struct Message {
 impl Message {
     pub fn new(text: &str) -> Self {
         Self {
-            should_render: true,
-            handle_input: true,
+            open: true,
             text: text.to_string(),
             rect: Rect::default(),
             kind: MessageKind::Info,
@@ -42,8 +40,7 @@ impl Message {
 
     pub fn new_disabled() -> Self {
         Self {
-            should_render: false,
-            handle_input: false,
+            open: false,
             text: "".to_string(),
             rect: Rect::default(),
             kind: MessageKind::Info,
@@ -52,15 +49,25 @@ impl Message {
 }
 
 // ====================================================================
-//  RENDERING
+//  METHODS
 // ====================================================================
 
 impl Message {
-    pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
-        if !self.should_render {
-            return;
-        }
+    fn close(&mut self) {
+        self.open = false;
+    }
+}
 
+// ====================================================================
+//  MENU TRAIT (RENDERING + INPUT)
+// ====================================================================
+
+impl Menu for Message {
+    fn is_open(&self) -> bool {
+        self.open
+    }
+
+    fn render(&mut self, f: &mut Frame, _area: &Rect) {
         let color = match self.kind {
             MessageKind::Info => Color::Blue,
             MessageKind::Warning => Color::Yellow,
@@ -84,56 +91,36 @@ impl Message {
                     .title_top(Line::from("<Esc> to close").alignment(Alignment::Right)),
             );
 
-        let window_width = f.area().width;
-        let text_area_width = (0.8 * (window_width as f32)) as u16;
-
-        // get the number of lines the text will take
+        // the height depends on the text: get the number of lines the
+        // text takes at the popup width, plus 2 for the border
+        let text_area_width = (0.8 * (f.area().width as f32)) as u16;
         let text_lines = paragraph.line_count(text_area_width) as u16;
 
-        let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
-        let vertical = Layout::vertical([text_lines + 2]).flex(Flex::Center);
-        let [rect] = vertical.areas(f.area());
-        let [rect] = horizontal.areas(rect);
+        let rect = centered_popup(
+            f.area(),
+            PopupSize::Fixed(text_area_width),
+            PopupSize::Fixed(text_lines + 2),
+        );
         self.rect = rect;
 
         f.render_widget(Clear, rect);
         f.render_widget(paragraph, rect);
     }
-}
 
-// ====================================================================
-//  USER INPUT
-// ====================================================================
-
-impl Message {
-    /// Handle user input for the message window
-    /// Always returns true (input is always handled)
-    pub fn input(&mut self, _action: &mut Action, _key_event: KeyEvent) -> bool {
-        if !self.handle_input {
-            return false;
-        }
-
-        self.should_render = false;
-        self.handle_input = false;
+    /// Handle user input for the message window: any key closes it.
+    /// (notes.md specifies Down/Up scrolling, but the popup is sized
+    /// to fit the whole text and has no scroll state.)
+    /// Always returns true (input is always consumed)
+    fn input(&mut self, _action: &mut Action, _key_event: KeyEvent) -> bool {
+        self.close();
         true
     }
-}
 
-// ====================================================================
-//  MOUSE INPUT
-// ====================================================================
-
-impl Message {
-    pub fn mouse_input(&mut self, _action: &mut Action, mouse_input: &mut MouseInput) {
-        if !self.handle_input {
-            return;
-        }
-
+    fn mouse_input(&mut self, _action: &mut Action, mouse_input: &mut MouseInput) {
         if let Some(mouse_event_kind) = mouse_input.kind() {
             if let MouseEventKind::Down(MouseButton::Left) = mouse_event_kind {
                 if !self.rect.contains(mouse_input.get_position()) {
-                    self.should_render = false;
-                    self.handle_input = false;
+                    self.close();
                 }
             }
             // Set the mouse event to handled

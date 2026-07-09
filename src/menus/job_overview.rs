@@ -10,6 +10,7 @@ use tui_textarea::{CursorMove, TextArea};
 use crate::app::Action;
 use crate::job::{Job, JobStatus};
 use crate::joblist::{JobList, JobListAction, SortCategory};
+use crate::menus::help::HelpContext;
 use crate::menus::OpenMenu;
 use crate::mouse_input::MouseInput;
 
@@ -31,8 +32,6 @@ pub struct MouseAreas {
 }
 
 pub struct JobOverview {
-    pub should_render: bool,               // if the window should render
-    pub handle_input: bool,                // if the window should handle input
     pub collapsed_top: bool,               // if the job list is collapsed
     pub collapsed_bot: bool,               // if the job details are collapsed
     pub focus: WindowFocus,                // which part of the window is in focus
@@ -61,8 +60,6 @@ impl JobOverview {
         let mut textarea = TextArea::from([command]);
         textarea.move_cursor(CursorMove::End);
         Self {
-            should_render: true,
-            handle_input: true,
             collapsed_top: false,
             collapsed_bot: true,
             focus: WindowFocus::JobDetails,
@@ -98,11 +95,6 @@ impl JobOverview {
 
 impl JobOverview {
     pub fn render(&mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
-        // only render if the window is active
-        if !self.should_render {
-            return;
-        }
-
         let mut constraints = vec![Constraint::Length(1)];
         if self.collapsed_top && self.collapsed_bot {
             constraints.push(Constraint::Length(1));
@@ -504,10 +496,6 @@ impl JobOverview {
     /// Returns true if the input was handled
     /// Returns false if the input was not handled
     pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
-        if !self.handle_input {
-            return false;
-        }
-
         if self.edit_squeue {
             match key_event.code {
                 KeyCode::Esc | KeyCode::Enter => {
@@ -551,11 +539,8 @@ impl JobOverview {
             KeyCode::Char('2') => {
                 self.select_log();
             }
-            KeyCode::Right => {
-                self.next_focus();
-            }
-            KeyCode::Left => {
-                self.prev_focus();
+            KeyCode::Right | KeyCode::Left => {
+                self.toggle_focus();
             }
             // Open job allocation menu
             KeyCode::Char('a') => {
@@ -565,7 +550,7 @@ impl JobOverview {
                 *action = Action::OpenMenu(OpenMenu::UserOptions);
             }
             KeyCode::Char('?') => {
-                *action = Action::OpenMenu(OpenMenu::Help(0));
+                *action = Action::OpenMenu(OpenMenu::Help(HelpContext::JobOverview));
             }
             // Collapsing/Extending the joblist
             KeyCode::Char('m') => {
@@ -606,26 +591,13 @@ impl JobOverview {
         }
     }
 
-    fn next_focus(&mut self) {
-        match self.focus {
-            WindowFocus::JobDetails => {
-                self.focus = WindowFocus::Log;
-            }
-            WindowFocus::Log => {
-                self.focus = WindowFocus::JobDetails;
-            }
-        }
-    }
-
-    fn prev_focus(&mut self) {
-        match self.focus {
-            WindowFocus::JobDetails => {
-                self.focus = WindowFocus::Log;
-            }
-            WindowFocus::Log => {
-                self.focus = WindowFocus::JobDetails;
-            }
-        }
+    /// Toggle the focus between the job details and the log section
+    /// (there are only two sections, so next and previous coincide)
+    fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            WindowFocus::JobDetails => WindowFocus::Log,
+            WindowFocus::Log => WindowFocus::JobDetails,
+        };
     }
 
     fn next_job(&mut self, action: &mut Action) {
@@ -634,10 +606,6 @@ impl JobOverview {
 
     fn prev_job(&mut self, action: &mut Action) {
         *action = Action::UpdateJobList(JobListAction::Previous);
-    }
-
-    pub fn set_index_raw(&mut self, index: i32) {
-        self.state.select(Some(index as usize));
     }
 
     pub fn set_index(&mut self, index: i32) {
@@ -651,9 +619,6 @@ impl JobOverview {
 
 impl JobOverview {
     pub fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
-        if !self.handle_input {
-            return;
-        }
         let mouse_pos = mouse_input.get_position();
 
         if let Some(event_kind) = mouse_input.kind() {

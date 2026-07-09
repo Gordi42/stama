@@ -1,7 +1,6 @@
 use crate::mouse_input::MouseInput;
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
-    layout::{Flex, Layout},
     prelude::*,
     style::{Color, Style},
     widgets::*,
@@ -9,7 +8,8 @@ use ratatui::{
 
 use crate::app::Action;
 use crate::job::Job;
-use crate::menus::OpenMenu;
+use crate::menus::help::HelpContext;
+use crate::menus::{centered_popup, wrap_index, Menu, OpenMenu, PopupSize};
 
 #[derive(Clone, Debug)]
 pub enum JobActions {
@@ -22,8 +22,7 @@ pub enum JobActions {
 }
 
 pub struct JobActionsMenu {
-    pub should_render: bool, // if the window should render
-    pub handle_input: bool,  // if the window should handle input
+    open: bool, // if the menu is open (rendered and handling input)
     pub index: i32,
     pub state: ListState,
     pub actions: Vec<JobActions>,
@@ -63,8 +62,7 @@ impl JobActionsMenu {
             *label = format!("{}. {}", i + 1, label);
         }
         Self {
-            should_render: false,
-            handle_input: false,
+            open: false,
             index: 0,
             state: ListState::default(),
             actions,
@@ -92,14 +90,7 @@ impl JobActionsMenu {
     }
 
     pub fn set_index(&mut self, index: i32) {
-        let max_ind = self.actions.len() as i32 - 1;
-        let mut new_index = index;
-        if index > max_ind {
-            new_index = 0;
-        } else if index < 0 {
-            new_index = max_ind;
-        }
-        self.index = new_index;
+        self.index = wrap_index(index as isize, 0, self.actions.len()) as i32;
         self.state.select(Some(self.index as usize));
     }
 
@@ -122,35 +113,30 @@ impl JobActionsMenu {
 
     pub fn activate(&mut self, job: &Job) {
         self.set_job(job.clone());
-        self.should_render = true;
-        self.handle_input = true;
+        self.open = true;
         self.set_index(0);
     }
 
     pub fn deactivate(&mut self) {
-        self.should_render = false;
-        self.handle_input = false;
+        self.open = false;
     }
 }
 
 // ====================================================================
-//  RENDERING
+//  MENU TRAIT (RENDERING + INPUT)
 // ====================================================================
 
-impl JobActionsMenu {
-    pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
-        if !self.should_render {
-            return;
-        }
+impl Menu for JobActionsMenu {
+    fn is_open(&self) -> bool {
+        self.open
+    }
 
-        let window_width = f.area().width;
-        let text_area_width = (0.8 * (window_width as f32)) as u16;
-
-        let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
-        let vertical = Layout::vertical([self.labels.len() as u16 + 2]).flex(Flex::Center);
-        let [rect] = vertical.areas(f.area());
-        let [rect] = horizontal.areas(rect);
-
+    fn render(&mut self, f: &mut Frame, _area: &Rect) {
+        let rect = centered_popup(
+            f.area(),
+            PopupSize::Fraction(0.8),
+            PopupSize::Fixed(self.labels.len() as u16 + 2),
+        );
         self.rect = rect;
         // clear the area
         f.render_widget(Clear, rect);
@@ -174,20 +160,10 @@ impl JobActionsMenu {
 
         f.render_stateful_widget(list, rect, &mut self.state);
     }
-}
 
-// ====================================================================
-//  USER INPUT
-// ====================================================================
-
-impl JobActionsMenu {
     /// Handle user input for the job actions menu
-    /// Always returns true (input is always handled)
-    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
-        if !self.handle_input {
-            return false;
-        }
-
+    /// Always returns true (input is always consumed)
+    fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
         match key_event.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('h') => {
                 self.deactivate();
@@ -202,7 +178,7 @@ impl JobActionsMenu {
                 self.perform_action(action);
             }
             KeyCode::Char('?') => {
-                *action = Action::OpenMenu(OpenMenu::Help(1));
+                *action = Action::OpenMenu(OpenMenu::Help(HelpContext::JobActions));
             }
             KeyCode::Char('1') => {
                 self.set_index(0);
@@ -229,18 +205,8 @@ impl JobActionsMenu {
         }
         true
     }
-}
 
-// ====================================================================
-//  MOUSE INPUT
-// ====================================================================
-
-impl JobActionsMenu {
-    pub fn mouse_input(&mut self, _action: &mut Action, mouse_input: &mut MouseInput) {
-        if !self.handle_input {
-            return;
-        }
-
+    fn mouse_input(&mut self, _action: &mut Action, mouse_input: &mut MouseInput) {
         if let Some(mouse_event_kind) = mouse_input.kind() {
             match mouse_event_kind {
                 MouseEventKind::Down(MouseButton::Left) => {

@@ -1,6 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::{
-    layout::{Flex, Layout},
     prelude::*,
     style::{Color, Style},
     widgets::*,
@@ -8,7 +7,8 @@ use ratatui::{
 
 use crate::{app::Action, mouse_input::MouseInput};
 
-use crate::menus::OpenMenu;
+use crate::menus::help::HelpContext;
+use crate::menus::{centered_popup, wrap_index, Menu, OpenMenu, PopupSize};
 
 use super::salloc_list::SallocList;
 use super::{entry_menu::EntryMenu, salloc_entry::SallocEntry};
@@ -23,8 +23,8 @@ pub enum Focus {
 ///
 /// Contains a list of editable presets
 pub struct SallocMenu {
-    should_render: bool,
-    handle_input: bool,
+    /// Whether the menu is open (rendered and handling input)
+    open: bool,
     /// The rectangle where to render the menu (for mouse input)
     rect: Rect,
     /// The presets pane:
@@ -57,8 +57,7 @@ impl SallocMenu {
     pub fn new() -> SallocMenu {
         let salloc_list = SallocList::load(None).unwrap_or_else(|_| SallocList::new());
         let mut salloc_menu = SallocMenu {
-            should_render: false,
-            handle_input: false,
+            open: false,
             salloc_list,
             rect: Rect::default(),
             preset_pane: Rect::default(),
@@ -79,27 +78,21 @@ impl SallocMenu {
 impl SallocMenu {
     /// Activate the menu
     pub fn activate(&mut self) {
-        self.should_render = true;
-        self.handle_input = true;
+        self.open = true;
     }
 
     /// Deactivate the menu
     pub fn deactivate(&mut self) {
-        self.should_render = false;
-        self.handle_input = false;
+        self.open = false;
         let _ = self.salloc_list.save(None);
     }
 
-    /// Set the index of list state
+    /// Set the index of list state. The list has one synthetic
+    /// trailing row ("Create new"), so index == len is a valid
+    /// selection and the wrap length is len + 1.
     pub fn set_index(&mut self, index: i32) {
-        let max_ind = self.salloc_list.len() as i32;
-        let mut new_index = index;
-        if index > max_ind {
-            new_index = 0;
-        } else if index < 0 {
-            new_index = max_ind;
-        }
-        self.state.select(Some(new_index as usize));
+        let new_index = wrap_index(index as isize, 0, self.salloc_list.len() + 1);
+        self.state.select(Some(new_index));
         self.entry_menu = EntryMenu::new(self.get_salloc_entry());
     }
 
@@ -202,27 +195,18 @@ impl SallocMenu {
 }
 
 // ====================================================================
-//  RENDERING
+//  MENU TRAIT (RENDERING + INPUT)
 // ====================================================================
 
-impl SallocMenu {
+impl Menu for SallocMenu {
+    fn is_open(&self) -> bool {
+        self.open
+    }
+
     /// Render the full salloc menu
     /// This is the main render function
-    pub fn render(&mut self, f: &mut Frame, _area: &Rect) {
-        if !self.should_render {
-            return;
-        }
-
-        let window_width = f.area().width;
-        let text_area_width = (0.8 * (window_width as f32)) as u16;
-
-        let window_height = f.area().height;
-        let text_area_height = (0.8 * (window_height as f32)) as u16;
-
-        let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
-        let vertical = Layout::vertical([text_area_height]).flex(Flex::Center);
-        let [rect] = vertical.areas(f.area());
-        let [rect] = horizontal.areas(rect);
+    fn render(&mut self, f: &mut Frame, _area: &Rect) {
+        let rect = centered_popup(f.area(), PopupSize::Fraction(0.8), PopupSize::Fraction(0.8));
         self.rect = rect;
 
         // clear the rect
@@ -256,6 +240,52 @@ impl SallocMenu {
         self.render_entry(f, &layout[1]);
     }
 
+    /// Handle user input for the salloc menu
+    /// Always returns true (no input is passed to windows below)
+    fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
+        if key_event.code == KeyCode::Tab {
+            self.toggle_focus();
+            return true;
+        }
+
+        match self.focus {
+            Focus::List => self.input_list(action, key_event),
+            Focus::Entry => self.input_entry(action, key_event),
+        }
+    }
+
+    fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
+        // first update the focused window pane
+        if let Some(MouseEventKind::Down(MouseButton::Left)) = mouse_input.kind() {
+            // close the window if the user clicks outside of it
+            if !self.rect.contains(mouse_input.get_position()) {
+                self.deactivate();
+                mouse_input.click();
+                return;
+            }
+            if self.preset_pane.contains(mouse_input.get_position()) {
+                self.focus_preset();
+            } else if self.settings_pane.contains(mouse_input.get_position()) {
+                self.focus_settings();
+            }
+        };
+
+        // handle the mouse input for the focused window pane
+        match self.focus {
+            Focus::List => self.mouse_input_list(action, mouse_input),
+            Focus::Entry => self.entry_menu.mouse_input(action, mouse_input),
+        }
+
+        // Set the mouse event to handled
+        mouse_input.handled = true;
+    }
+}
+
+// ====================================================================
+//  RENDER HELPERS
+// ====================================================================
+
+impl SallocMenu {
     /// Render the list of salloc entries
     /// This renders the left column
     fn render_list(&mut self, f: &mut Frame, area: &Rect) {
@@ -318,30 +348,11 @@ impl SallocMenu {
 // ====================================================================
 
 impl SallocMenu {
-    /// Handle user input for the user settings window
-    /// Always return true (no input is passed to windows below)
-    pub fn input(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
-        if !self.handle_input {
-            return false;
-        }
-
-        if key_event.code == KeyCode::Tab {
-            self.toggle_focus();
-            return true;
-        }
-
-        match self.focus {
-            Focus::List => self.input_list(action, key_event),
-            Focus::Entry => self.input_entry(action, key_event),
-        }
-    }
-
     /// Handle user input for the list window
     /// Always return true (no input is passed to windows below)
-    pub fn input_list(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
+    fn input_list(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
         match key_event.code {
             KeyCode::Esc | KeyCode::Char('q') => {
-                *action = Action::UpdateUserOptions;
                 self.deactivate();
             }
             KeyCode::Down | KeyCode::Char('j') => {
@@ -359,7 +370,7 @@ impl SallocMenu {
                     *action = Action::RemoveSallocEntryDialog;
                 }
             KeyCode::Char('?') => {
-                *action = Action::OpenMenu(OpenMenu::Help(2));
+                *action = Action::OpenMenu(OpenMenu::Help(HelpContext::AllocationMenu));
             }
 
             _ => {}
@@ -367,9 +378,9 @@ impl SallocMenu {
         true
     }
 
-    /// Handle user input for the list window
+    /// Handle user input for the entry window
     /// Always return true (no input is passed to windows below)
-    pub fn input_entry(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
+    fn input_entry(&mut self, action: &mut Action, key_event: KeyEvent) -> bool {
         // first handle the input for the entry menu
         let status = self.entry_menu.input(action, key_event);
         // if the input was handled, return true
@@ -381,12 +392,11 @@ impl SallocMenu {
         // else check for other key events
         match key_event.code {
             KeyCode::Esc | KeyCode::Char('q') => {
-                *action = Action::UpdateUserOptions;
                 self.deactivate();
                 return true;
             }
             KeyCode::Char('?') => {
-                *action = Action::OpenMenu(OpenMenu::Help(2));
+                *action = Action::OpenMenu(OpenMenu::Help(HelpContext::AllocationMenu));
                 return true;
             }
 
@@ -402,35 +412,6 @@ impl SallocMenu {
 // ====================================================================
 
 impl SallocMenu {
-    pub fn mouse_input(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
-        if !self.handle_input {
-            return;
-        }
-        // first update the focused window pane
-        if let Some(MouseEventKind::Down(MouseButton::Left)) = mouse_input.kind() {
-            // close the window if the user clicks outside of it
-            if !self.rect.contains(mouse_input.get_position()) {
-                self.deactivate();
-                mouse_input.click();
-                return;
-            }
-            if self.preset_pane.contains(mouse_input.get_position()) {
-                self.focus_preset();
-            } else if self.settings_pane.contains(mouse_input.get_position()) {
-                self.focus_settings();
-            }
-        };
-
-        // handle the mouse input for the focused window pane
-        match self.focus {
-            Focus::List => self.mouse_input_list(action, mouse_input),
-            Focus::Entry => self.entry_menu.mouse_input(action, mouse_input),
-        }
-
-        // Set the mouse event to handled
-        mouse_input.handled = true;
-    }
-
     /// Handle mouse input for the list window
     fn mouse_input_list(&mut self, action: &mut Action, mouse_input: &mut MouseInput) {
         if let Some(mouse_event_kind) = mouse_input.kind() {
@@ -468,6 +449,7 @@ impl SallocMenu {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::menus::Menu;
     use crossterm::event::KeyModifiers;
 
     /// Build a menu with the given entries whose selection starts at

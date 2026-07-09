@@ -5,8 +5,6 @@ use ratatui::{
 };
 use tui_textarea::{CursorMove, TextArea};
 
-use crate::app::Action;
-
 pub enum TextFieldType {
     Text(String),
     Integer(usize),
@@ -202,21 +200,23 @@ impl TextField {
 // ====================================================================
 
 impl TextField {
-    /// Handle user input for the user settings window
-    /// Always returns true (input is always handled)
-    pub fn input(&mut self, key_event: KeyEvent, action: &mut Action) -> bool {
+    /// Handle user input while the field is being edited.
+    /// Returns true when the edited value was submitted (Enter);
+    /// the owning menu decides what a submission means.
+    pub fn input(&mut self, key_event: KeyEvent) -> bool {
         match key_event.code {
             KeyCode::Esc => {
                 self.reset();
+                false
             }
             KeyCode::Enter => {
                 self.apply();
-                *action = Action::UpdateUserOptions;
+                true
             }
             _ => {
                 self.text_area.input(key_event);
+                false
             }
         }
-        true
     }
 }

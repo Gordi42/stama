@@ -44,18 +44,6 @@ impl<T: Serialize> SallocList<T> {
         Ok(entry)
     }
 
-    pub fn get_mut(&mut self, index: usize) -> eyre::Result<&mut T> {
-        let entry = self
-            .entries
-            .get_mut(index)
-            .ok_or_else(|| eyre::eyre!("Index out of bounds."))?;
-        Ok(entry)
-    }
-
-    pub fn set_list(&mut self, list: Vec<T>) {
-        self.entries = list;
-    }
-
     pub fn len(&self) -> usize {
         self.entries.len()
     }
