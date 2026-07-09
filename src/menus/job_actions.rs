@@ -36,6 +36,12 @@ pub struct JobActionsMenu {
 //  CONSTRUCTOR
 // ========================================================================
 
+impl Default for JobActionsMenu {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JobActionsMenu {
     pub fn new() -> Self {
         let job = Job::default();
@@ -61,8 +67,8 @@ impl JobActionsMenu {
             handle_input: false,
             index: 0,
             state: ListState::default(),
-            actions: actions,
-            labels: labels,
+            actions,
+            labels,
             job_name: String::new(),
             rect: Rect::default(),
         }

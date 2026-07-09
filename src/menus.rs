@@ -108,7 +108,7 @@ impl MenuContainer {
     fn open_job_action(&mut self, joblist: &JobList) {
         match joblist.get_job() {
             Some(job) => {
-                self.job_actions_menu.activate(&job);
+                self.job_actions_menu.activate(job);
             }
             None => {
                 self.message = Message::new("No job selected");

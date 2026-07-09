@@ -61,6 +61,8 @@ pub struct Job {
 // ====================================================================
 
 impl Job {
+    // A constructor mirroring the struct's fields; grouping them would be a refactor.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: &str,
         name: &str,
@@ -75,13 +77,13 @@ impl Job {
         Self {
             id: id.to_string(),
             name: name.to_string(),
-            status: status,
+            status,
             time: time.to_string(),
             partition: partition.to_string(),
-            nodes: nodes,
+            nodes,
             workdir: workdir.to_string(),
             command: command.to_string(),
-            output: output,
+            output,
         }
     }
 
@@ -146,12 +148,9 @@ impl Job {
     }
 
     pub fn is_completed(&self) -> bool {
-        match self.status {
-            JobStatus::Completed => true,
-            JobStatus::Failed => true,
-            JobStatus::Timeout => true,
-            JobStatus::Cancelled => true,
-            _ => false,
-        }
+        matches!(
+            self.status,
+            JobStatus::Completed | JobStatus::Failed | JobStatus::Timeout | JobStatus::Cancelled
+        )
     }
 }

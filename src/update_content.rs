@@ -21,10 +21,10 @@ impl Content {
         log_text: String,
     ) -> Self {
         Self {
-            job: job,
-            job_list: job_list,
-            details_text: details_text,
-            log_text: log_text,
+            job,
+            job_list,
+            details_text,
+            log_text,
         }
     }
 }
@@ -36,6 +36,12 @@ pub struct MyProcess {
 
 pub struct ContentUpdater {
     pub my_process: Option<MyProcess>,
+}
+
+impl Default for ContentUpdater {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ContentUpdater {
@@ -78,7 +84,7 @@ impl ContentUpdater {
         });
         self.my_process = Some(MyProcess {
             receiver: rx,
-            handler: handler,
+            handler,
         });
     }
 }
@@ -136,19 +142,13 @@ fn get_content(job: Option<Job>, command: String, options: UserOptions) -> Conte
     let mut details_text = "No job selected".to_string();
     let mut log_text = "No logfile available".to_string();
     // collect the job details
-    match job {
-        Some(ref job) => {
-            details_text = rx_jd.recv().unwrap();
-            handle_jd.join().unwrap();
-            match job.output {
-                Some(_) => {
-                    log_text = rx_log.recv().unwrap();
-                    handle_log.join().unwrap();
-                }
-                None => {}
-            }
+    if let Some(ref job) = job {
+        details_text = rx_jd.recv().unwrap();
+        handle_jd.join().unwrap();
+        if job.output.is_some() {
+            log_text = rx_log.recv().unwrap();
+            handle_log.join().unwrap();
         }
-        None => {}
     }
     // if a job is JobStatus::Completing, another job JobStatus::Completed exist
     // remove the JobStatus::Completed job
@@ -231,7 +231,7 @@ fn get_squeue_joblist(command: &str) -> Vec<Job> {
 
 pub fn get_squeue_output(command: &str) -> String {
     // split the command into first word and the rest
-    let mut parts = command.trim().split_whitespace();
+    let mut parts = command.split_whitespace();
     let program = parts.next().unwrap_or(" ");
     let args: Vec<&str> = parts.collect();
 
@@ -293,11 +293,11 @@ fn get_acct_joblist(command: &str) -> Vec<Job> {
 }
 
 pub fn get_sacct_output(command: &str) -> String {
-    let mut parts = command.trim().split_whitespace();
+    let mut parts = command.split_whitespace();
     let _program = parts.next().unwrap_or(" ");
     let args: Vec<&str> = parts.collect();
 
-    let entries = vec![
+    let entries = [
         "JobID",
         "JobName",
         "State",
@@ -362,7 +362,7 @@ pub fn format_sacct_output(output: &str) -> Vec<Job> {
         let command = fields[7].trim().to_string();
 
         joblist.push(Job::new(
-            &id, &name, status, &time, partition, nodes, &workdir, &command, None,
+            id, &name, status, time, partition, nodes, &workdir, &command, None,
         ));
     }
     joblist
@@ -420,7 +420,7 @@ fn format_time_used(time_str: &str) -> String {
     let mut time_output = "0-00:00:00".to_string();
     if time_str.len() <= time_output.len() {
         let start_ind = time_output.len() - time_str.len();
-        time_output.replace_range(start_ind.., &time_str);
+        time_output.replace_range(start_ind.., time_str);
     } else {
         time_output = time_str.to_string();
     }

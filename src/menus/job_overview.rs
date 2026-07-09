@@ -66,11 +66,11 @@ impl JobOverview {
             collapsed_top: false,
             collapsed_bot: true,
             focus: WindowFocus::JobDetails,
-            state: state,
-            mouse_areas: mouse_areas,
+            state,
+            mouse_areas,
             squeue_command: textarea,
             edit_squeue: false,
-            refresh_rate: refresh_rate,
+            refresh_rate,
             log_height: 0,
         }
     }
@@ -154,13 +154,13 @@ impl JobOverview {
 
     fn render_joblist_collapsed(&mut self, f: &mut Frame, area: &Rect, jobs: &JobList) {
         // update the mouse areas
-        self.mouse_areas.joblist_title = area.clone();
+        self.mouse_areas.joblist_title = *area;
         self.mouse_areas.joblist = Rect::default();
 
         let job = match jobs.get_job() {
             Some(job) => job,
             None => {
-                let title = format!("▶ Job list (collapsed)");
+                let title = "▶ Job list (collapsed)".to_string();
                 f.render_widget(Line::from(title), *area);
                 return;
             }
@@ -168,7 +168,7 @@ impl JobOverview {
 
         let col = get_job_color(job);
 
-        let content_strings = vec![
+        let content_strings = [
             "▶ Job: ".to_string(),
             job.id.clone(),
             job.name.clone(),
@@ -212,23 +212,23 @@ impl JobOverview {
             .title_top(Line::from(refresh_rate).alignment(Alignment::Right));
 
         // update the mouse areas
-        let mut top_row = area.clone();
+        let mut top_row = *area;
         top_row.height = 1;
         top_row.width = title_len - 2;
         self.mouse_areas.joblist_title = top_row;
-        let mut joblist_area = block.inner(*area).clone();
+        let mut joblist_area = block.inner(*area);
 
         f.render_widget(block.clone(), *area);
 
         // render the squeue command
         let buffer = self.get_squeue_command();
-        let mut squeue_rect = top_row.clone();
+        let mut squeue_rect = top_row;
         squeue_rect.width = buffer.len() as u16 + 1;
         squeue_rect.x = title_len - 1;
         self.mouse_areas.squeue_command = squeue_rect;
         self.render_squeue_command(f, &squeue_rect);
 
-        if jobs.len() == 0 {
+        if jobs.is_empty() {
             self.render_empty_joblist(f, &joblist_area);
             return;
         }
@@ -304,7 +304,7 @@ impl JobOverview {
         rects = rects
             .iter()
             .map(|rect| {
-                let mut r = rect.clone();
+                let mut r = *rect;
                 r.height = 1;
                 r
             })
@@ -320,13 +320,12 @@ impl JobOverview {
             .row_highlight_style(Style::new().reversed());
 
         // render the table
-        f.render_stateful_widget(table, joblist_area.clone(), &mut self.state);
+        f.render_stateful_widget(table, joblist_area, &mut self.state);
 
         // update the mouse areas
         joblist_area.y += 1; // remove the header row
         joblist_area.height = joblist_area.height.saturating_sub(1);
         self.mouse_areas.joblist = joblist_area;
-        return;
     }
 
     fn render_squeue_command(&mut self, f: &mut Frame, area: &Rect) {
@@ -438,15 +437,15 @@ impl JobOverview {
         if title.len() != 4 {
             return;
         }
-        let mut top_row = area.clone();
+        let mut top_row = *area;
         top_row.height = 1;
-        let mut symbol = top_row.clone();
+        let mut symbol = top_row;
         symbol.width = title[0].width() as u16;
         symbol.x += offset;
-        let mut details_title = top_row.clone();
+        let mut details_title = top_row;
         details_title.width = title[1].width() as u16;
         details_title.x += symbol.width + symbol.x;
-        let mut log_title = top_row.clone();
+        let mut log_title = top_row;
         log_title.width = title[3].width() as u16;
         log_title.x += details_title.width + details_title.x + 2;
         self.mouse_areas.bottom_symbol = symbol;

@@ -99,7 +99,7 @@ impl TextField {
         let is_valid = match self.field_type {
             TextFieldType::Integer(_) => {
                 let lines = self.text_area.lines().join("\n");
-                !lines.parse::<usize>().is_err()
+                lines.parse::<usize>().is_ok()
             }
             _ => true,
         };
@@ -191,7 +191,6 @@ impl TextField {
                     .fg(Color::Black)
                     .add_modifier(Modifier::BOLD),
             );
-        } else {
         }
 
         f.render_widget(self.text_area.widget(), chunks[2]);

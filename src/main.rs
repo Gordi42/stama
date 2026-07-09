@@ -63,11 +63,8 @@ fn main() -> Result<()> {
     }
     // Exit the user interface.
     tui.exit()?;
-    match app.exit_command {
-        Some(command) => {
-            write_output_file(&command);
-        }
-        None => {}
+    if let Some(command) = app.exit_command {
+        write_output_file(&command);
     }
 
     Ok(())

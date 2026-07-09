@@ -42,17 +42,12 @@ impl UserOptions {
         if !file_exists() {
             return Self::default();
         }
-        match Self::load_from_file() {
-            Ok(user_options) => user_options,
-            Err(_) => Self::default(),
-        }
+        Self::load_from_file().unwrap_or_default()
     }
 
     pub fn save(&self) {
-        match self.try_save() {
-            Ok(_) => (),
-            Err(_) => (),
-        }
+        // errors while saving are intentionally ignored
+        let _ = self.try_save();
     }
 
     pub fn try_save(&self) -> Result<()> {

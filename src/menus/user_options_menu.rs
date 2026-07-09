@@ -56,7 +56,7 @@ impl UserOptionsMenu {
             should_render: false,
             handle_input: false,
             rect: Rect::default(),
-            entries: entries,
+            entries,
             index: 0,
             state: ListState::default(),
             offset: 0,
@@ -84,28 +84,28 @@ impl UserOptionsMenu {
     }
 
     pub fn to_user_option(&self) -> UserOptions {
-        let mut user_options = UserOptions::default();
-        user_options.refresh_rate = match &self.entries[0].field_type {
-            TextFieldType::Integer(u) => *u,
-            _ => 250,
-        };
-        user_options.show_completed_jobs = match &self.entries[1].field_type {
-            TextFieldType::Boolean(b) => *b,
-            _ => true,
-        };
-        user_options.confirm_before_quit = match &self.entries[2].field_type {
-            TextFieldType::Boolean(b) => *b,
-            _ => false,
-        };
-        user_options.confirm_before_kill = match &self.entries[3].field_type {
-            TextFieldType::Boolean(b) => *b,
-            _ => true,
-        };
-        user_options.external_editor = match &self.entries[4].field_type {
-            TextFieldType::Text(s) => s.clone(),
-            _ => "vim".to_string(),
-        };
-        user_options
+        UserOptions {
+            refresh_rate: match &self.entries[0].field_type {
+                TextFieldType::Integer(u) => *u,
+                _ => 250,
+            },
+            show_completed_jobs: match &self.entries[1].field_type {
+                TextFieldType::Boolean(b) => *b,
+                _ => true,
+            },
+            confirm_before_quit: match &self.entries[2].field_type {
+                TextFieldType::Boolean(b) => *b,
+                _ => false,
+            },
+            confirm_before_kill: match &self.entries[3].field_type {
+                TextFieldType::Boolean(b) => *b,
+                _ => true,
+            },
+            external_editor: match &self.entries[4].field_type {
+                TextFieldType::Text(s) => s.clone(),
+                _ => "vim".to_string(),
+            },
+        }
     }
 
     pub fn activate(&mut self) {
@@ -225,10 +225,8 @@ impl UserOptionsMenu {
         // check if the user is typing in a text field
         let entry = &mut self.entries[self.index as usize];
         if entry.active {
-            match key_event.code {
-                _ => {
-                    entry.input(key_event, action);
-                }
+            {
+                entry.input(key_event, action);
             }
             return true;
         }

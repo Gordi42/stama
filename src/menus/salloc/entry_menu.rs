@@ -192,10 +192,8 @@ impl EntryMenu {
         // check if the user is typing in a text field
         let entry = &mut self.entries[self.index as usize];
         if entry.active {
-            match key_event.code {
-                _ => {
-                    entry.input(key_event, action);
-                }
+            {
+                entry.input(key_event, action);
             }
             return true;
         }

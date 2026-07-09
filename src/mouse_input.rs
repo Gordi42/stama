@@ -9,6 +9,12 @@ pub struct MouseInput {
     last_click_pos: Position,
 }
 
+impl Default for MouseInput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MouseInput {
     pub fn new() -> Self {
         Self {
@@ -54,11 +60,7 @@ impl MouseInput {
         if self.handled {
             None
         } else {
-            if let Some(event) = &self.event {
-                Some(event.kind)
-            } else {
-                None
-            }
+            self.event.as_ref().map(|event| event.kind)
         }
     }
 }

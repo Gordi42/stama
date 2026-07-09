@@ -47,6 +47,12 @@ pub struct SallocMenu {
 //  CONSTRUCTOR
 // ====================================================================
 
+impl Default for SallocMenu {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SallocMenu {
     pub fn new() -> SallocMenu {
         let salloc_list = SallocList::load(None).unwrap_or_else(|_| SallocList::new());
@@ -100,18 +106,16 @@ impl SallocMenu {
     /// Select the next salloc entry
     fn next(&mut self) {
         let index = self.state.selected();
-        match index {
-            Some(ind) => self.set_index(ind as i32 + 1),
-            None => {}
+        if let Some(ind) = index {
+            self.set_index(ind as i32 + 1)
         };
     }
 
     /// Select the previous salloc entry
     fn previous(&mut self) {
         let index = self.state.selected();
-        match index {
-            Some(ind) => self.set_index(ind as i32 - 1),
-            None => {}
+        if let Some(ind) = index {
+            self.set_index(ind as i32 - 1)
         };
     }
 
@@ -140,10 +144,7 @@ impl SallocMenu {
     /// Get the currently selected Salloc Entry
     /// Returns None if no entry is selected
     fn get_salloc_entry(&self) -> Option<&SallocEntry> {
-        let index = match self.state.selected() {
-            Some(ind) => ind,
-            None => return None,
-        };
+        let index = self.state.selected()?;
         self.salloc_list.entries.get(index)
     }
 
@@ -315,12 +316,9 @@ impl SallocMenu {
             return false;
         }
 
-        match key_event.code {
-            KeyCode::Tab => {
-                self.toggle_focus();
-                return true;
-            }
-            _ => {}
+        if key_event.code == KeyCode::Tab {
+            self.toggle_focus();
+            return true;
         }
 
         match self.focus {
@@ -346,12 +344,11 @@ impl SallocMenu {
             KeyCode::Enter | KeyCode::Char('l') => {
                 self.start_salloc(action);
             }
-            KeyCode::Char('d') => {
+            KeyCode::Char('d')
                 // check if the user is trying to delete an existing entry
-                if self.get_salloc_entry().is_some() {
+                if self.get_salloc_entry().is_some() => {
                     *action = Action::RemoveSallocEntryDialog;
                 }
-            }
             KeyCode::Char('?') => {
                 *action = Action::OpenMenu(OpenMenu::Help(2));
             }
@@ -401,22 +398,17 @@ impl SallocMenu {
             return;
         }
         // first update the focused window pane
-        if let Some(mouse_event_kind) = mouse_input.kind() {
-            match mouse_event_kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    // close the window if the user clicks outside of it
-                    if !self.rect.contains(mouse_input.get_position()) {
-                        self.deactivate();
-                        mouse_input.click();
-                        return;
-                    }
-                    if self.preset_pane.contains(mouse_input.get_position()) {
-                        self.focus_preset();
-                    } else if self.settings_pane.contains(mouse_input.get_position()) {
-                        self.focus_settings();
-                    }
-                }
-                _ => {}
+        if let Some(MouseEventKind::Down(MouseButton::Left)) = mouse_input.kind() {
+            // close the window if the user clicks outside of it
+            if !self.rect.contains(mouse_input.get_position()) {
+                self.deactivate();
+                mouse_input.click();
+                return;
+            }
+            if self.preset_pane.contains(mouse_input.get_position()) {
+                self.focus_preset();
+            } else if self.settings_pane.contains(mouse_input.get_position()) {
+                self.focus_settings();
             }
         };
 

@@ -29,7 +29,7 @@ impl Confirmation {
         Self {
             should_render: true,
             handle_input: true,
-            action: action,
+            action,
             select_yes: false,
             message: message.to_string(),
             confirm_rect: Rect::default(),
@@ -93,11 +93,11 @@ impl Confirmation {
 
         let window_width = f.area().width;
         let mut text_area_width = 40;
-        text_area_width = text_area_width.min(window_width as u16);
+        text_area_width = text_area_width.min(window_width);
 
         let window_height = f.area().height;
         let mut text_area_height = 9;
-        text_area_height = text_area_height.min(window_height as u16);
+        text_area_height = text_area_height.min(window_height);
 
         let horizontal = Layout::horizontal([text_area_width]).flex(Flex::Center);
         let vertical = Layout::vertical([text_area_height]).flex(Flex::Center);
@@ -240,19 +240,16 @@ impl Confirmation {
         }
 
         if let Some(mouse_event_kind) = mouse_input.kind() {
-            match mouse_event_kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if !self.confirm_rect.contains(mouse_input.get_position()) {
-                        self.deny();
-                    }
-                    if self.yes_rect.contains(mouse_input.get_position()) {
-                        self.confirm(action);
-                    }
-                    if self.no_rect.contains(mouse_input.get_position()) {
-                        self.deny();
-                    }
+            if let MouseEventKind::Down(MouseButton::Left) = mouse_event_kind {
+                if !self.confirm_rect.contains(mouse_input.get_position()) {
+                    self.deny();
                 }
-                _ => {}
+                if self.yes_rect.contains(mouse_input.get_position()) {
+                    self.confirm(action);
+                }
+                if self.no_rect.contains(mouse_input.get_position()) {
+                    self.deny();
+                }
             }
             // Set the mouse event to handled
             mouse_input.click();

@@ -58,6 +58,12 @@ pub struct HelpMenu {
 //  CONSTRUCTOR
 // ====================================================================
 
+impl Default for HelpMenu {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HelpMenu {
     pub fn new() -> Self {
         // job overview category
@@ -232,7 +238,7 @@ impl HelpMenu {
                     .border_style(Style::default().fg(Color::Yellow))
                     .title_style(Style::default().fg(Color::Yellow));
 
-                let mut title_rect = render_rect.clone();
+                let mut title_rect = render_rect;
                 title_rect.height = 1;
                 f.render_widget(block, title_rect);
                 render_rect.y += 1;
@@ -259,7 +265,7 @@ impl HelpMenu {
 
                 let desc_height: u16 =
                     (description.line_count(desc_width) as u16).min(render_rect.height);
-                let mut entry_rect = render_rect.clone();
+                let mut entry_rect = render_rect;
                 entry_rect.height = desc_height;
                 render_rect.y += desc_height;
                 render_rect.height = render_rect.height.saturating_sub(desc_height);
@@ -319,11 +325,11 @@ impl HelpMenu {
 
         if let Some(mouse_event_kind) = mouse_input.kind() {
             match mouse_event_kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if !self.rect.contains(mouse_input.get_position()) {
-                        self.should_render = false;
-                        self.handle_input = false;
-                    }
+                MouseEventKind::Down(MouseButton::Left)
+                    if !self.rect.contains(mouse_input.get_position()) =>
+                {
+                    self.should_render = false;
+                    self.handle_input = false;
                 }
                 MouseEventKind::ScrollDown => {
                     self.scroll_down();

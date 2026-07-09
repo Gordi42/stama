@@ -83,6 +83,12 @@ impl JobList {
     }
 }
 
+impl Default for JobList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Returns the username of the current user.
 fn whoami() -> String {
     let command = Command::new("whoami").output();
@@ -134,6 +140,11 @@ impl JobList {
     /// Returns the length of the job list.
     pub fn len(&self) -> usize {
         self.jobs.len()
+    }
+
+    /// Returns whether the job list is empty.
+    pub fn is_empty(&self) -> bool {
+        self.jobs.is_empty()
     }
 }
 
@@ -252,16 +263,13 @@ impl JobList {
         let job: Option<Job> = self.get_job().cloned();
         let command = self.squeue_command.clone();
         // check if the content updater returns a new job list
-        match self
+        if let Some(content) = self
             .content_updater
             .tick(job.clone(), command, user_options.clone())
         {
-            Some(content) => {
-                self.jobs = content.job_list;
-                self.job_details = content.details_text;
-                self.log_tail = content.log_text;
-            }
-            None => {}
+            self.jobs = content.job_list;
+            self.job_details = content.details_text;
+            self.log_tail = content.log_text;
         }
         // sort the job list
         self.sort_raw();
@@ -498,13 +506,13 @@ mod tests {
         job_list.selected = 1;
 
         // Test negating the reverse boolean.
-        assert_eq!(job_list.reverse, false);
+        assert!(!job_list.reverse);
         job_list.negate_reverse();
-        assert_eq!(job_list.reverse, true);
+        assert!(job_list.reverse);
         // check if the selected index is set back to 0
         assert_eq!(job_list.selected, 0);
         job_list.negate_reverse();
-        assert_eq!(job_list.reverse, false);
+        assert!(!job_list.reverse);
     }
 
     #[test]

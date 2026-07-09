@@ -130,14 +130,11 @@ impl Message {
         }
 
         if let Some(mouse_event_kind) = mouse_input.kind() {
-            match mouse_event_kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if !self.rect.contains(mouse_input.get_position()) {
-                        self.should_render = false;
-                        self.handle_input = false;
-                    }
+            if let MouseEventKind::Down(MouseButton::Left) = mouse_event_kind {
+                if !self.rect.contains(mouse_input.get_position()) {
+                    self.should_render = false;
+                    self.handle_input = false;
                 }
-                _ => {}
             }
             // Set the mouse event to handled
             mouse_input.click();

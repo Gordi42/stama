@@ -83,6 +83,12 @@ pub struct App {
 //  CONSTRUCTOR
 // ===================================================================
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     pub fn new() -> Self {
         // loading user options from config file
@@ -239,7 +245,7 @@ impl App {
     /// will be shown.
     fn kill_job(&mut self, job: &Job) {
         // perform the kill command
-        let command_status = Command::new("scancel").arg(job.id.to_string()).output();
+        let command_status = Command::new("scancel").arg(&job.id).output();
         // check if the command was successful. This will check if the command
         // could be executed. It will not check if the job was actually killed.
         match command_status {
@@ -326,28 +332,25 @@ impl App {
     /// flag is set to true. (see main.rs)
     pub fn open_file_in_editor(&mut self) {
         let editor = self.user_options.external_editor.as_str();
-        match &self.vim_path {
-            Some(path) => {
-                let mut parts = editor.trim().split_whitespace();
-                let program = parts.next().unwrap_or(" ");
-                let args: Vec<&str> = parts.collect();
+        if let Some(path) = &self.vim_path {
+            let mut parts = editor.split_whitespace();
+            let program = parts.next().unwrap_or(" ");
+            let args: Vec<&str> = parts.collect();
 
-                let mut child = Command::new(program)
-                    .args(args)
-                    .arg(path)
-                    .stdin(Stdio::inherit())
-                    .stdout(Stdio::inherit())
-                    .stderr(Stdio::inherit())
-                    .spawn()
-                    .expect("Failed to execute command");
+            let mut child = Command::new(program)
+                .args(args)
+                .arg(path)
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute command");
 
-                // Wait for the process to finish
-                child.wait().expect("Failed to wait on child");
+            // Wait for the process to finish
+            child.wait().expect("Failed to wait on child");
 
-                self.open_vim = false;
-                self.vim_path = None;
-            }
-            None => {}
+            self.open_vim = false;
+            self.vim_path = None;
         }
     }
 
@@ -433,7 +436,7 @@ impl App {
     /// Start the Salloc Command
     pub fn start_salloc(&mut self) {
         println!("{}", self.command);
-        let mut parts = self.command.trim().split_whitespace();
+        let mut parts = self.command.split_whitespace();
         let program = parts.next().unwrap_or(" ");
         let args: Vec<&str> = parts.collect();
         let output_status = Command::new(program)
@@ -445,16 +448,15 @@ impl App {
             .spawn(); //.expect("Failed to execute command");
 
         // open a error dialog if the command could not be executed
-        if output_status.is_err() {
-            let msg = format!(
-                "Error starting salloc command: {}",
-                output_status.err().unwrap()
-            );
-            self.open_error_message(&msg);
-        } else {
-            let mut child = output_status.unwrap();
-            // Wait for the process to finish
-            child.wait().expect("Failed to wait on child");
+        match output_status {
+            Err(err) => {
+                let msg = format!("Error starting salloc command: {}", err);
+                self.open_error_message(&msg);
+            }
+            Ok(mut child) => {
+                // Wait for the process to finish
+                child.wait().expect("Failed to wait on child");
+            }
         }
 
         self.should_execute_command = false;
@@ -475,11 +477,11 @@ impl App {
     pub fn input(&mut self, key_event: KeyEvent) {
         // Ctrl + C should always quit, regardless of the input mode
         match key_event.code {
-            KeyCode::Char('c') | KeyCode::Char('C') => {
-                if key_event.modifiers == KeyModifiers::CONTROL {
-                    self.quit();
-                    return;
-                }
+            KeyCode::Char('c') | KeyCode::Char('C')
+                if key_event.modifiers == KeyModifiers::CONTROL =>
+            {
+                self.quit();
+                return;
             }
             _ => {}
         };

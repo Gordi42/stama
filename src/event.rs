@@ -91,7 +91,7 @@ impl EventHandler {
         // pipeline move to the thread
         thread::spawn(move || {
             let mut last_tick = Instant::now();
-            while !stop_receiver.try_recv().is_ok() {
+            while stop_receiver.try_recv().is_err() {
                 let timeout = tick_rate
                     .checked_sub(last_tick.elapsed())
                     .unwrap_or(tick_rate);
