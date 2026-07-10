@@ -78,6 +78,13 @@ stama --completions fish > ~/.config/fish/completions/stama.fish
 ![20240421_19h48m15s_grim](https://github.com/Gordi42/stama/assets/118457787/23bb3bc0-1746-46e3-ba5f-2d7ab998ccc0)
 6. **Change squeue command:** Press '/' or click on the squeue command with the mouse to change the squeue command, 'squeue' without any additional arguments will show all running jobs from all users.
 
+## Configuration
+Stama stores its settings in '($HOME)/.config/stama/config.toml'. All settings can be changed from within stama in the user settings menu ('o'), including the columns of the job table ("Job columns", a comma-separated list). Alternatively, edit the config file directly. For example, to show the job priority instead of the node count:
+```toml
+job_columns = ["id", "name", "status", "time", "partition", "priority"]
+```
+Available columns: `id`, `name`, `status`, `time`, `partition`, `nodes`, `priority`, `reason`, `account`, `qos`, `cpus`, `nodelist`. Clicking a column header (or pressing 'tab') sorts the job list by that column. If `job_columns` is missing from the config file, the default columns `id, name, status, time, partition, nodes` are used.
+
 **For more infos see:** [notes.md](notes.md)
 
 

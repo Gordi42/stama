@@ -204,6 +204,13 @@ fn squeue_format_arg() -> String {
         "Command:256",
         "StdOut:256",
         "Reason:64",
+        // PriorityLong yields the priority as a sortable integer
+        // (the plain "Priority" field is a float in 0..1)
+        "PriorityLong:16",
+        "Account:32",
+        "QOS:32",
+        "NumCPUs:8",
+        "NodeList:64",
     ];
     // "|%|" is used as the field delimiter; it is attached as a suffix
     // to every field except the last
@@ -414,16 +421,17 @@ pub fn read_last_lines(path: &str, lines: usize) -> Result<String, SchedulerErro
 ///
 /// The field order must match the `--Format` list built in
 /// [`squeue_format_arg`]: JobID, Name, StateCompact, TimeUsed,
-/// PendingTime, Partition, NumNodes, WorkDir, Command, StdOut, Reason.
+/// PendingTime, Partition, NumNodes, WorkDir, Command, StdOut, Reason,
+/// PriorityLong, Account, QOS, NumCPUs, NodeList.
 pub fn format_squeue_output(output: &str) -> Vec<Job> {
     let mut joblist = vec![];
     for line in output.lines().skip(1) {
         let parts = line.split("|%|").map(|s| s.trim()).collect::<Vec<&str>>();
-        // A well-formed line has 11 fields separated by 10 "|%|" delimiters
+        // A well-formed line has 16 fields separated by 15 "|%|" delimiters
         // (the --Format suffix is attached to every entry except the last),
-        // so splitting yields exactly 11 parts. Skip anything shorter
+        // so splitting yields exactly 16 parts. Skip anything shorter
         // (error messages, help text, truncated output) instead of panicking.
-        if parts.len() < 11 {
+        if parts.len() < 16 {
             continue;
         }
         let id = parts[0].to_string();
@@ -463,6 +471,11 @@ pub fn format_squeue_output(output: &str) -> Vec<Job> {
             Some(output),
         );
         job.reason = reason;
+        job.priority = parts[11].parse::<u64>().unwrap_or(0);
+        job.account = parts[12].to_string();
+        job.qos = parts[13].to_string();
+        job.cpus = parts[14].parse::<u32>().unwrap_or(0);
+        job.nodelist = parts[15].to_string();
         joblist.push(job);
     }
     joblist
@@ -816,17 +829,18 @@ mod tests {
     // ----------------------------------------------------------------
     // Field order must match the --Format list in squeue_format_arg:
     // JobID, Name, StateCompact, TimeUsed, PendingTime, Partition,
-    // NumNodes, WorkDir, Command, StdOut, Reason
+    // NumNodes, WorkDir, Command, StdOut, Reason, PriorityLong,
+    // Account, QOS, NumCPUs, NodeList
     // The "|%|" suffix is attached to every field except the last, so a
-    // line has 11 fields and 10 delimiters. The first line is the header.
+    // line has 16 fields and 15 delimiters. The first line is the header.
 
-    fn squeue_line(fields: [&str; 11]) -> String {
+    fn squeue_line(fields: [&str; 16]) -> String {
         fields.join("|%|")
     }
 
     #[test]
     fn format_squeue_output_parses_running_and_pending_jobs() {
-        let header = "JOBID|%|NAME|%|ST|%|TIME|%|PENDING_TIME|%|PARTITION|%|NODES|%|WORK_DIR|%|COMMAND|%|STDOUT|%|REASON";
+        let header = "JOBID|%|NAME|%|ST|%|TIME|%|PENDING_TIME|%|PARTITION|%|NODES|%|WORK_DIR|%|COMMAND|%|STDOUT|%|REASON|%|PRIORITY|%|ACCOUNT|%|QOS|%|CPUS|%|NODELIST";
         let running = squeue_line([
             "1234 ",
             " job_running ",
@@ -839,6 +853,11 @@ mod tests {
             "/work/run.sh ",
             "/work/out-%j.log ",
             "None ",
+            "4294901760 ",
+            "physics ",
+            "normal ",
+            "16 ",
+            "l[42314-42315] ",
         ]);
         let pending = squeue_line([
             "5678",
@@ -852,6 +871,11 @@ mod tests {
             "/work2/run.sh",
             "/work2/out.log",
             "Priority",
+            "1013",
+            "chemistry",
+            "high",
+            "8",
+            "",
         ]);
         let output = format!("{}\n{}\n{}\n", header, running, pending);
 
@@ -870,6 +894,11 @@ mod tests {
         assert_eq!(jobs[0].output.as_deref(), Some("/work/out-%j.log"));
         // the reason is only stored for pending jobs
         assert_eq!(jobs[0].reason, None);
+        assert_eq!(jobs[0].priority, 4294901760);
+        assert_eq!(jobs[0].account, "physics");
+        assert_eq!(jobs[0].qos, "normal");
+        assert_eq!(jobs[0].cpus, 16);
+        assert_eq!(jobs[0].nodelist, "l[42314-42315]");
 
         assert_eq!(jobs[1].id, "5678");
         assert_eq!(jobs[1].status, JobStatus::Pending);
@@ -877,6 +906,12 @@ mod tests {
         assert_eq!(jobs[1].time, "0-01:01:01");
         assert_eq!(jobs[1].nodes, 2);
         assert_eq!(jobs[1].reason.as_deref(), Some("Priority"));
+        assert_eq!(jobs[1].priority, 1013);
+        assert_eq!(jobs[1].account, "chemistry");
+        assert_eq!(jobs[1].qos, "high");
+        assert_eq!(jobs[1].cpus, 8);
+        // a pending job has no allocated nodes yet
+        assert_eq!(jobs[1].nodelist, "");
     }
 
     #[test]
@@ -885,7 +920,8 @@ mod tests {
         // submitted) keeps the raw value; the display layer maps it
         let header = "H";
         let pending = squeue_line([
-            "1", "job", "PD", "0:00", "5", "gpu", "1", "/w", "/w/r.sh", "/w/o.log", "None",
+            "1", "job", "PD", "0:00", "5", "gpu", "1", "/w", "/w/r.sh", "/w/o.log", "None", "12",
+            "acc", "qos", "4", "",
         ]);
         let output = format!("{}\n{}\n", header, pending);
         let jobs = format_squeue_output(&output);
@@ -894,12 +930,37 @@ mod tests {
 
         // an empty reason field stays None
         let pending = squeue_line([
-            "1", "job", "PD", "0:00", "5", "gpu", "1", "/w", "/w/r.sh", "/w/o.log", "",
+            "1", "job", "PD", "0:00", "5", "gpu", "1", "/w", "/w/r.sh", "/w/o.log", "", "12",
+            "acc", "qos", "4", "",
         ]);
         let output = format!("{}\n{}\n", header, pending);
         let jobs = format_squeue_output(&output);
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].reason, None);
+    }
+
+    #[test]
+    fn format_squeue_output_skips_lines_in_the_old_11_field_format() {
+        // a line in the old 11-field format (before PriorityLong,
+        // Account, QOS, NumCPUs and NodeList were added) is too short
+        // for the 16-field bounds guard and is skipped, not mis-parsed
+        let output = "H\n1|%|job|%|R|%|1:00|%|0|%|gpu|%|1|%|/w|%|/w/r.sh|%|/w/o.log|%|None\n";
+        assert!(format_squeue_output(output).is_empty());
+    }
+
+    #[test]
+    fn format_squeue_output_tolerates_non_numeric_priority_and_cpus() {
+        let header = "H";
+        let line = squeue_line([
+            "1", "job", "R", "1:00", "0", "gpu", "1", "/w", "/w/r.sh", "/w/o.log", "None", "N/A",
+            "acc", "qos", "N/A", "n01",
+        ]);
+        let output = format!("{}\n{}\n", header, line);
+        let jobs = format_squeue_output(&output);
+        assert_eq!(jobs.len(), 1);
+        // unparsable numeric fields fall back to 0 instead of panicking
+        assert_eq!(jobs[0].priority, 0);
+        assert_eq!(jobs[0].cpus, 0);
     }
 
     // ----------------------------------------------------------------

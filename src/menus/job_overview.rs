@@ -8,8 +8,9 @@ use ratatui::{
 use tui_textarea::{CursorMove, TextArea};
 
 use crate::app::Action;
+use crate::columns::JobColumn;
 use crate::job::{explain_reason, reason_code, Job, JobStatus};
-use crate::joblist::{JobList, JobListAction, SortCategory};
+use crate::joblist::{JobList, JobListAction};
 use crate::menus::help::HelpContext;
 use crate::menus::OpenMenu;
 use crate::mouse_input::MouseInput;
@@ -41,6 +42,7 @@ pub struct JobOverview {
     pub edit_squeue: bool,                 // if the squeue command is being edited
     pub refresh_rate: usize,               // the refresh rate of the window
     pub log_height: u16,                   // the height of the log section
+    pub columns: Vec<JobColumn>,           // the configured job table columns
 }
 
 // ====================================================================
@@ -48,12 +50,12 @@ pub struct JobOverview {
 // ====================================================================
 
 impl JobOverview {
-    pub fn new(refresh_rate: usize, squeue_command: &str) -> Self {
+    pub fn new(refresh_rate: usize, squeue_command: &str, columns: Vec<JobColumn>) -> Self {
         let mut state = TableState::default();
         state.select(Some(0));
-        // create mouse areas with 6 categories
+        // create one mouse area per configured column
         let mut mouse_areas = MouseAreas::default();
-        for _ in 0..6 {
+        for _ in 0..columns.len() {
             mouse_areas.categories.push(Rect::default());
         }
         let command = squeue_command.to_string();
@@ -69,6 +71,7 @@ impl JobOverview {
             edit_squeue: false,
             refresh_rate,
             log_height: 0,
+            columns,
         }
     }
 }
@@ -160,15 +163,9 @@ impl JobOverview {
 
         let col = get_job_color(job);
 
-        let content_strings = [
-            "▶ Job: ".to_string(),
-            job.id.clone(),
-            job.name.clone(),
-            job.status.to_string(),
-            job.time.clone(),
-            job.partition.clone(),
-            job.nodes.to_string(),
-        ];
+        // the collapsed one-line row shows the configured columns
+        let mut content_strings = vec!["▶ Job: ".to_string()];
+        content_strings.extend(self.columns.iter().map(|column| column.cell(job)));
 
         let constraints = content_strings
             .iter()
@@ -237,58 +234,48 @@ impl JobOverview {
         //  CREATE THE JOB LIST
         // ----------------------------------------------
 
-        // Create the titles for the columns
-        let mut title_names = vec![
-            Span::raw("ID"),
-            Span::raw("Name"),
-            Span::raw("Status"),
-            Span::raw("Time"),
-            Span::raw("Partition"),
-            Span::raw("Nodes"),
-        ];
-        // modify the title names if the category is selected
-        let cat_ind = match jobs.get_sort_category() {
-            SortCategory::Id => 0,
-            SortCategory::Name => 1,
-            SortCategory::Status => 2,
-            SortCategory::Time => 3,
-            SortCategory::Partition => 4,
-            SortCategory::Nodes => 5,
-        };
-        let title_string: String = title_names[cat_ind].content.clone().into();
-        let new_title = format!(
-            "{} {}",
-            title_string,
-            if jobs.is_reverse() { "▲" } else { "▼" }
-        );
-        title_names[cat_ind] = Span::styled(new_title, Style::default().fg(Color::Blue));
+        // Create the titles for the configured columns
+        let mut title_names = self
+            .columns
+            .iter()
+            .map(|column| Span::raw(column.header()))
+            .collect::<Vec<Span>>();
+        // mark the sort category with a direction arrow (the sort
+        // category may not be displayed; then no title is marked)
+        let cat_ind = self
+            .columns
+            .iter()
+            .position(|column| column == jobs.get_sort_category());
+        if let Some(cat_ind) = cat_ind {
+            let new_title = format!(
+                "{} {}",
+                self.columns[cat_ind].header(),
+                if jobs.is_reverse() { "▲" } else { "▼" }
+            );
+            title_names[cat_ind] = Span::styled(new_title, Style::default().fg(Color::Blue));
+        }
 
         // Create the rows for the job list
         let rows = jobs
             .jobs
             .iter()
             .map(|job| {
-                Row::new(vec![
-                    job.id.clone(),
-                    job.name.clone(),
-                    job.status.to_string(),
-                    format_time(job),
-                    job.partition.clone(),
-                    job.nodes.to_string(),
-                ])
+                Row::new(
+                    self.columns
+                        .iter()
+                        .map(|column| column.cell(job))
+                        .collect::<Vec<String>>(),
+                )
                 .style(Style::default().fg(get_job_color(job)))
             })
             .collect::<Vec<Row>>();
 
         // Create the widths for the columns
-        let widths = [
-            Constraint::Min(8),
-            Constraint::Min(10),
-            Constraint::Min(8),
-            Constraint::Min(6),
-            Constraint::Min(11),
-            Constraint::Min(7),
-        ];
+        let widths = self
+            .columns
+            .iter()
+            .map(|column| Constraint::Min(column.min_width()))
+            .collect::<Vec<Constraint>>();
 
         // set the flex and spacing for the columns
 
@@ -296,7 +283,7 @@ impl JobOverview {
         let column_spacing = 1;
 
         // get the rects for the columnss and update the mouse areas
-        let mut rects = Layout::horizontal(widths)
+        let mut rects = Layout::horizontal(widths.clone())
             .flex(flex)
             .spacing(column_spacing)
             .split(joblist_area);
@@ -477,24 +464,6 @@ fn get_job_color(job: &Job) -> Color {
         JobStatus::Timeout => Color::Red,
         JobStatus::Cancelled => Color::Red,
         JobStatus::Unknown => Color::Red,
-    }
-}
-
-fn format_time(job: &Job) -> String {
-    let time_str = job.time.clone();
-
-    let parts: Vec<&str> = time_str.split('-').collect();
-    match parts.len() {
-        1 => parts[0].to_string(),
-        2 => {
-            let days = parts[0].parse::<i32>().unwrap_or(0);
-            if days > 0 {
-                time_str
-            } else {
-                parts[1].to_string()
-            }
-        }
-        _ => "".to_string(),
     }
 }
 
@@ -760,21 +729,15 @@ impl JobOverview {
                         self.edit_squeue = true;
                         mouse_input.click();
                     }
-                    // joblist categories
+                    // joblist categories (one mouse area per column)
                     for (i, category) in self.mouse_areas.categories.iter().enumerate() {
                         if category.contains(mouse_pos) {
-                            let new_cat = match i {
-                                0 => SortCategory::Id,
-                                1 => SortCategory::Name,
-                                2 => SortCategory::Status,
-                                3 => SortCategory::Time,
-                                4 => SortCategory::Partition,
-                                5 => SortCategory::Nodes,
-                                _ => SortCategory::Id,
-                            };
-                            *action =
-                                Action::UpdateJobList(JobListAction::SelectSortCategory(new_cat));
-                            mouse_input.click();
+                            if let Some(new_cat) = self.columns.get(i).copied() {
+                                *action = Action::UpdateJobList(JobListAction::SelectSortCategory(
+                                    new_cat,
+                                ));
+                                mouse_input.click();
+                            }
                         }
                     }
                     // joblist entries
@@ -825,15 +788,6 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
-    #[test]
-    fn test_format_time() {
-        let mut job = Job::new_default();
-        job.time = "0-00:00:10".to_string();
-        assert_eq!(format_time(&job), "00:00:10");
-        job.time = "1-00:00:10".to_string();
-        assert_eq!(format_time(&job), "1-00:00:10");
-    }
-
     fn make_running_job() -> Job {
         Job::new(
             "424242",
@@ -860,9 +814,19 @@ mod tests {
     }
 
     fn render_overview(width: u16, height: u16, jobs: &JobList, expand_details: bool) -> String {
+        render_overview_with_columns(width, height, jobs, expand_details, JobColumn::defaults())
+    }
+
+    fn render_overview_with_columns(
+        width: u16,
+        height: u16,
+        jobs: &JobList,
+        expand_details: bool,
+        columns: Vec<JobColumn>,
+    ) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut overview = JobOverview::new(250, "squeue -u user");
+        let mut overview = JobOverview::new(250, "squeue -u user", columns);
         overview.collapsed_bot = !expand_details;
         terminal
             .draw(|f| {
@@ -890,6 +854,49 @@ mod tests {
         assert!(content.contains("424242"));
         assert!(content.contains("train_model"));
         assert!(content.contains("Running"));
+    }
+
+    /// Regression test: with the default configuration the job table
+    /// shows exactly the historical six column headers.
+    #[test]
+    fn test_render_default_columns_shows_historical_headers() {
+        let mut jobs = JobList::new();
+        jobs.jobs.push(make_running_job());
+        jobs.set_index(0).unwrap();
+
+        let content = render_to_string(100, 20, &jobs);
+        for header in ["ID", "Name", "Status", "Time", "Partition", "Nodes"] {
+            assert!(content.contains(header), "missing header {:?}", header);
+        }
+        // headers of non-default columns are not shown
+        assert!(!content.contains("Priority"));
+        assert!(!content.contains("Account"));
+    }
+
+    #[test]
+    fn test_render_custom_columns_with_priority() {
+        let mut job = make_running_job();
+        job.priority = 4294901760;
+        let mut jobs = JobList::new();
+        jobs.jobs.push(job);
+        jobs.set_index(0).unwrap();
+
+        // the user replaced the Nodes column with Priority
+        let columns = vec![
+            JobColumn::Id,
+            JobColumn::Name,
+            JobColumn::Status,
+            JobColumn::Time,
+            JobColumn::Partition,
+            JobColumn::Priority,
+        ];
+        let content = render_overview_with_columns(100, 20, &jobs, false, columns);
+
+        // the Priority header and value are shown ...
+        assert!(content.contains("Priority"));
+        assert!(content.contains("4294901760"));
+        // ... and the Nodes column is gone
+        assert!(!content.contains("Nodes"));
     }
 
     /// Regression test: rendering into a terminal narrower than the

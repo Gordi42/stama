@@ -107,7 +107,7 @@ impl JobActionsMenu {
     }
 
     fn perform_action(&mut self, action: &mut Action) {
-        *action = Action::JobOption(self.get_action());
+        *action = Action::JobOption(Box::new(self.get_action()));
         self.deactivate();
     }
 

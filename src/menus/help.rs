@@ -127,6 +127,14 @@ impl HelpMenu {
             HelpEntry::new("Down/Up (j/k)", "Next/Previous setting"),
             HelpEntry::new("Enter (l)", "Open setting actions menu"),
             HelpEntry::new("Esc", "Close setting menu"),
+            HelpEntry::new(
+                "Job columns",
+                "Comma-separated columns of the job table, e.g. 'id, name, status, time, partition, priority'",
+            ),
+            HelpEntry::new(
+                "  available",
+                "id, name, status, time, partition, nodes, priority, reason, account, qos, cpus, nodelist",
+            ),
         ];
         let stama_settings = HelpCategory::new("Stama Settings", stama_settings_entries);
         // info category

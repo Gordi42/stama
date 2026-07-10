@@ -80,6 +80,16 @@ pub struct Job {
     pub output: Option<String>, // the output of the job
     /// The squeue "Reason" of the job (only meaningful for Pending).
     pub reason: Option<String>,
+    /// The scheduling priority of the job (squeue PriorityLong).
+    pub priority: u64,
+    /// The account the job is charged to.
+    pub account: String,
+    /// The quality of service of the job.
+    pub qos: String,
+    /// The number of allocated CPUs.
+    pub cpus: u32,
+    /// The compressed node list of the job (e.g. "l[42314-42316]").
+    pub nodelist: String,
     /// seff-style efficiency stats (filled in for the selected job).
     /// Boxed to keep `Job` (which is embedded in action enums) small.
     pub stats: Option<Box<JobStats>>,
@@ -114,6 +124,11 @@ impl Job {
             command: command.to_string(),
             output,
             reason: None,
+            priority: 0,
+            account: String::new(),
+            qos: String::new(),
+            cpus: 0,
+            nodelist: String::new(),
             stats: None,
         }
     }
@@ -131,6 +146,11 @@ impl Job {
             command: "/path/to/script".to_string(),
             output: None,
             reason: None,
+            priority: 0,
+            account: String::new(),
+            qos: String::new(),
+            cpus: 0,
+            nodelist: String::new(),
             stats: None,
         }
     }

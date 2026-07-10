@@ -9,6 +9,7 @@ use crate::{
 };
 
 pub mod app;
+pub mod columns;
 pub mod event;
 pub mod job;
 pub mod joblist;

@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 use crate::app::Action;
+use crate::columns::JobColumn;
 use crate::menus::help::HelpContext;
 use crate::menus::{centered_popup, wrap_index, Menu, OpenMenu, PopupSize};
 use crate::mouse_input::MouseInput;
@@ -49,6 +50,7 @@ impl UserOptionsMenu {
                 TextFieldType::Boolean(list.confirm_before_kill),
             ),
             TextField::new("External editor", TextFieldType::Text(list.external_editor)),
+            TextField::new("Job columns", TextFieldType::Columns(list.job_columns)),
         ];
 
         Self {
@@ -102,6 +104,10 @@ impl UserOptionsMenu {
             external_editor: match &self.entries[4].field_type {
                 TextFieldType::Text(s) => s.clone(),
                 _ => "vim".to_string(),
+            },
+            job_columns: match &self.entries[5].field_type {
+                TextFieldType::Columns(columns) => columns.clone(),
+                _ => JobColumn::defaults(),
             },
         }
     }

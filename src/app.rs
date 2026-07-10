@@ -41,8 +41,9 @@ pub enum Action {
     UpdateUserOptions,
     /// Updates the joblist (e.g. job selection, job sorting, etc.)
     UpdateJobList(JobListAction),
-    /// Handles a job action (e.g. kill, open log)
-    JobOption(JobActions),
+    /// Handles a job action (e.g. kill, open log). Boxed because the
+    /// embedded [`Job`] makes this variant much larger than the rest.
+    JobOption(Box<JobActions>),
     /// Quits stama with an "ssh <node>" exit command to the given node
     /// (emitted by the node selection popup for multi-node jobs)
     SshToNode(String),
@@ -161,7 +162,7 @@ impl App {
                 self.update_job_list(change.clone());
             }
             Action::JobOption(action) => {
-                self.handle_job_action(action.clone());
+                self.handle_job_action((**action).clone());
             }
             Action::SshToNode(node) => {
                 let node = node.clone();
@@ -211,11 +212,16 @@ impl App {
             self.menus.job_overview.refresh_rate = new_rate;
             self.should_set_frame_rate = true;
         }
+        // keep the job table columns of the job overview in sync
+        if self.menus.job_overview.columns != self.user_options.job_columns {
+            self.menus.job_overview.columns = self.user_options.job_columns.clone();
+        }
     }
 
     /// Updates the joblist (e.g. job selection, job sorting, etc.)
     fn update_job_list(&mut self, change: JobListAction) {
-        self.joblist.handle_joblist_action(change);
+        self.joblist
+            .handle_joblist_action(change, &self.user_options.job_columns);
     }
 
     /// Handles a job action (e.g. kill, open log)
@@ -257,7 +263,7 @@ impl App {
             let msg = format!("Kill job {} ({})?", job_name, job.id);
             self.menus.confirmation = Confirmation::new(
                 &msg,
-                Action::JobOption(JobActions::KillConfirmed(job.clone())),
+                Action::JobOption(Box::new(JobActions::KillConfirmed(job.clone()))),
             );
         } else {
             self.kill_job(job);
@@ -587,7 +593,7 @@ mod tests {
 
         let mut job = Job::new_default();
         job.id = "4242".to_string();
-        app.action = Action::JobOption(JobActions::Kill(job));
+        app.action = Action::JobOption(Box::new(JobActions::Kill(job)));
         app.handle_action();
 
         // the fake scheduler received exactly one cancel request with
@@ -611,7 +617,7 @@ mod tests {
         });
         let mut app = app_with_fake(Arc::clone(&fake));
 
-        app.action = Action::JobOption(JobActions::KillConfirmed(Job::new_default()));
+        app.action = Action::JobOption(Box::new(JobActions::KillConfirmed(Job::new_default())));
         app.handle_action();
 
         assert_eq!(
@@ -641,7 +647,7 @@ mod tests {
     fn ssh_to_single_node_job_sets_the_exit_command_directly() {
         let mut app = app_with_nodes(vec!["gpu1"]);
 
-        app.action = Action::JobOption(JobActions::SSH(Job::new_default()));
+        app.action = Action::JobOption(Box::new(JobActions::SSH(Job::new_default())));
         app.handle_action();
 
         // one node: no popup, the ssh exit command is set immediately
@@ -654,7 +660,7 @@ mod tests {
     fn ssh_to_multi_node_job_opens_the_node_selection_popup() {
         let mut app = app_with_nodes(vec!["gpu1", "gpu3", "mem1"]);
 
-        app.action = Action::JobOption(JobActions::SSH(Job::new_default()));
+        app.action = Action::JobOption(Box::new(JobActions::SSH(Job::new_default())));
         app.handle_action();
 
         // several nodes: the popup opens instead of quitting
@@ -677,7 +683,7 @@ mod tests {
     fn ssh_with_empty_node_list_opens_an_error_message() {
         let mut app = app_with_nodes(vec![]);
 
-        app.action = Action::JobOption(JobActions::SSH(Job::new_default()));
+        app.action = Action::JobOption(Box::new(JobActions::SSH(Job::new_default())));
         app.handle_action();
 
         assert!(!app.menus.node_select_menu.is_open());

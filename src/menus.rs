@@ -160,7 +160,11 @@ impl MenuContainer {
     /// Construct a new menu container
     pub fn new(user_options: &UserOptions, joblist: &JobList) -> Self {
         Self {
-            job_overview: JobOverview::new(user_options.refresh_rate, &joblist.squeue_command),
+            job_overview: JobOverview::new(
+                user_options.refresh_rate,
+                &joblist.squeue_command,
+                user_options.job_columns.clone(),
+            ),
             job_actions_menu: JobActionsMenu::new(),
             node_select_menu: NodeSelectMenu::new(),
             salloc_menu: SallocMenu::new(),

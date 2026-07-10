@@ -2,34 +2,11 @@ use color_eyre::{eyre::eyre, Result};
 use std::process::Command;
 use std::sync::Arc;
 
+use crate::columns::JobColumn;
 use crate::job::Job;
 use crate::scheduler::{Scheduler, SlurmScheduler};
 use crate::update_content::{ContentTick, ContentUpdater, TIMEOUT_ERROR};
 use crate::user_options::UserOptions;
-
-#[derive(PartialEq, Clone, Debug)]
-pub enum SortCategory {
-    Id,
-    Name,
-    Status,
-    Time,
-    Partition,
-    Nodes,
-}
-
-impl SortCategory {
-    /// Returns the next sort category.
-    pub fn next(&self) -> SortCategory {
-        match self {
-            SortCategory::Id => SortCategory::Name,
-            SortCategory::Name => SortCategory::Status,
-            SortCategory::Status => SortCategory::Time,
-            SortCategory::Time => SortCategory::Partition,
-            SortCategory::Partition => SortCategory::Nodes,
-            SortCategory::Nodes => SortCategory::Id,
-        }
-    }
-}
 
 /// An enum to handle actions that change the selected job.
 #[derive(Debug, Clone)]
@@ -37,7 +14,7 @@ pub enum JobListAction {
     Next,
     Previous,
     Select(usize),
-    SelectSortCategory(SortCategory),
+    SelectSortCategory(JobColumn),
     NextSortCategory,
     ReverseSortDirection,
     UpdateSqueueCommand(String),
@@ -68,8 +45,8 @@ pub struct JobList {
     // A string that contains the log tail of the selected job.
     // This string is displayed in the log view.
     log_tail: String,
-    // The category by which the jobs are sorted.
-    sort_category: SortCategory,
+    // The column by which the jobs are sorted.
+    sort_category: JobColumn,
     // A boolean that indicates whether the jobs are sorted in reverse order.
     reverse: bool,
     // A module that contains the logic for updating the job list.
@@ -96,7 +73,7 @@ impl JobList {
             selected: 0,
             job_details: String::new(),
             log_tail: String::new(),
-            sort_category: SortCategory::Id,
+            sort_category: JobColumn::Id,
             reverse: false,
             content_updater: ContentUpdater::with_scheduler(scheduler),
             squeue_command: match get_user() {
@@ -165,8 +142,8 @@ impl JobList {
         self.selected
     }
 
-    /// Returns the category by which the jobs are sorted.
-    pub fn get_sort_category(&self) -> &SortCategory {
+    /// Returns the column by which the jobs are sorted.
+    pub fn get_sort_category(&self) -> &JobColumn {
         &self.sort_category
     }
 
@@ -238,7 +215,9 @@ impl JobList {
 
     /// Handles an action that changes the selected job.
     /// Or changes the sort category or the reverse boolean.
-    pub fn handle_joblist_action(&mut self, action: JobListAction) {
+    /// `columns` are the displayed job table columns; Tab
+    /// (`NextSortCategory`) cycles through them.
+    pub fn handle_joblist_action(&mut self, action: JobListAction, columns: &[JobColumn]) {
         match action {
             JobListAction::Next => self.next(),
             JobListAction::Previous => self.previous(),
@@ -250,7 +229,7 @@ impl JobList {
                 }
             }
             JobListAction::NextSortCategory => {
-                self.set_sort_category(self.sort_category.next());
+                self.set_sort_category(self.sort_category.next_in(columns));
             }
             JobListAction::ReverseSortDirection => {
                 self.negate_reverse();
@@ -270,8 +249,8 @@ impl JobList {
         }
     }
 
-    /// Sets the category by which the jobs are sorted.
-    pub fn set_sort_category(&mut self, category: SortCategory) {
+    /// Sets the column by which the jobs are sorted.
+    pub fn set_sort_category(&mut self, category: JobColumn) {
         self.sort_category = category;
         // sort the jobs
         self.sort_raw();
@@ -381,17 +360,17 @@ impl JobList {
         // sort the job list based on the sort_category
         // secondary sort is based on the id
         match self.sort_category {
-            SortCategory::Id => {
+            JobColumn::Id => {
                 self.jobs.sort_by(|a, b| compare_job_ids(&b.id, &a.id));
             }
-            SortCategory::Name => {
+            JobColumn::Name => {
                 self.jobs.sort_by(|a, b| {
                     a.name
                         .cmp(&b.name)
                         .then_with(|| compare_job_ids(&a.id, &b.id))
                 });
             }
-            SortCategory::Status => {
+            JobColumn::Status => {
                 self.jobs.sort_by(|a, b| {
                     a.status
                         .priority()
@@ -399,24 +378,70 @@ impl JobList {
                         .then_with(|| compare_job_ids(&a.id, &b.id))
                 });
             }
-            SortCategory::Time => {
+            JobColumn::Time => {
                 self.jobs.sort_by(|a, b| {
                     a.time
                         .cmp(&b.time)
                         .then_with(|| compare_job_ids(&a.id, &b.id))
                 });
             }
-            SortCategory::Partition => {
+            JobColumn::Partition => {
                 self.jobs.sort_by(|a, b| {
                     a.partition
                         .cmp(&b.partition)
                         .then_with(|| compare_job_ids(&a.id, &b.id))
                 });
             }
-            SortCategory::Nodes => {
+            JobColumn::Nodes => {
                 self.jobs.sort_by(|a, b| {
                     b.nodes
                         .cmp(&a.nodes)
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
+                });
+            }
+            // like Nodes, the numeric columns sort descending
+            // (highest priority / most CPUs first)
+            JobColumn::Priority => {
+                self.jobs.sort_by(|a, b| {
+                    b.priority
+                        .cmp(&a.priority)
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
+                });
+            }
+            JobColumn::Cpus => {
+                self.jobs.sort_by(|a, b| {
+                    b.cpus
+                        .cmp(&a.cpus)
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
+                });
+            }
+            JobColumn::Reason => {
+                self.jobs.sort_by(|a, b| {
+                    a.reason
+                        .as_deref()
+                        .unwrap_or("")
+                        .cmp(b.reason.as_deref().unwrap_or(""))
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
+                });
+            }
+            JobColumn::Account => {
+                self.jobs.sort_by(|a, b| {
+                    a.account
+                        .cmp(&b.account)
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
+                });
+            }
+            JobColumn::Qos => {
+                self.jobs.sort_by(|a, b| {
+                    a.qos
+                        .cmp(&b.qos)
+                        .then_with(|| compare_job_ids(&a.id, &b.id))
+                });
+            }
+            JobColumn::NodeList => {
+                self.jobs.sort_by(|a, b| {
+                    a.nodelist
+                        .cmp(&b.nodelist)
                         .then_with(|| compare_job_ids(&a.id, &b.id))
                 });
             }
@@ -715,7 +740,7 @@ mod tests {
     fn test_sort_by_status() {
         // create_job_list: id "1" Running, id "2" Pending, id "3" Completing
         let mut job_list = create_job_list();
-        job_list.set_sort_category(SortCategory::Status);
+        job_list.set_sort_category(JobColumn::Status);
 
         // ascending by status priority:
         // Pending (1) < Running (2) < Completing (3)
@@ -736,10 +761,48 @@ mod tests {
         job_list
             .jobs
             .push(create_job("11", JobStatus::Running, "00:00:00", 2));
-        job_list.set_sort_category(SortCategory::Nodes);
+        job_list.set_sort_category(JobColumn::Nodes);
 
         // descending by node count; ties broken by ascending numeric id
         assert_eq!(job_ids(&job_list), ["10", "9", "11"]);
+    }
+
+    #[test]
+    fn test_sort_by_priority() {
+        let mut job_list = JobList::new();
+        // squeue PriorityLong values are large integers; a numeric sort
+        // must not compare them lexicographically
+        for (id, priority) in [("9", 900u64), ("10", 4294901760), ("11", 900)] {
+            let mut job = create_job(id, JobStatus::Running, "00:00:00", 1);
+            job.priority = priority;
+            job_list.jobs.push(job);
+        }
+        job_list.set_sort_category(JobColumn::Priority);
+
+        // descending by priority; ties broken by ascending numeric id
+        assert_eq!(job_ids(&job_list), ["10", "9", "11"]);
+
+        // reversed: ascending by priority
+        job_list.negate_reverse();
+        assert_eq!(job_ids(&job_list), ["11", "9", "10"]);
+    }
+
+    #[test]
+    fn test_next_sort_category_cycles_displayed_columns() {
+        let mut job_list = create_job_list();
+        // with the default columns, Tab cycles Id -> Name
+        job_list.handle_joblist_action(JobListAction::NextSortCategory, &JobColumn::defaults());
+        assert_eq!(*job_list.get_sort_category(), JobColumn::Name);
+
+        // with a custom column set, Tab only visits the displayed columns
+        let columns = vec![JobColumn::Id, JobColumn::Priority];
+        job_list.handle_joblist_action(JobListAction::NextSortCategory, &columns);
+        // "Name" is not displayed, so the cycle restarts at the first column
+        assert_eq!(*job_list.get_sort_category(), JobColumn::Id);
+        job_list.handle_joblist_action(JobListAction::NextSortCategory, &columns);
+        assert_eq!(*job_list.get_sort_category(), JobColumn::Priority);
+        job_list.handle_joblist_action(JobListAction::NextSortCategory, &columns);
+        assert_eq!(*job_list.get_sort_category(), JobColumn::Id);
     }
 
     #[test]
@@ -754,7 +817,7 @@ mod tests {
         job_list
             .jobs
             .push(create_job("11", JobStatus::Running, "00:05:00", 1));
-        job_list.set_sort_category(SortCategory::Time);
+        job_list.set_sort_category(JobColumn::Time);
 
         // ascending by time string; ties broken by ascending numeric id
         assert_eq!(job_ids(&job_list), ["10", "11", "9"]);

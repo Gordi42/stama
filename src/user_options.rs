@@ -4,6 +4,8 @@ use std::fs::{self, File};
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
+use crate::columns::JobColumn;
+
 // `#[serde(default)]` makes every missing field fall back to the value
 // from `UserOptions::default()`. This way a config file written by an
 // older stama version (or by a future version with additional fields)
@@ -16,6 +18,9 @@ pub struct UserOptions {
     pub confirm_before_quit: bool, // Confirm before quitting
     pub confirm_before_kill: bool, // Confirm before killing a job
     pub external_editor: String,   // External editor command (e.g. "vim")
+    // The columns of the job table, e.g.
+    // job_columns = ["id", "name", "status", "time", "partition", "priority"]
+    pub job_columns: Vec<JobColumn>,
 }
 
 impl Default for UserOptions {
@@ -26,6 +31,7 @@ impl Default for UserOptions {
             confirm_before_quit: false,
             confirm_before_kill: true,
             external_editor: "vim".to_string(),
+            job_columns: JobColumn::defaults(),
         }
     }
 }
@@ -130,6 +136,12 @@ mod tests {
             confirm_before_quit: true,
             confirm_before_kill: false,
             external_editor: "nano".to_string(),
+            job_columns: vec![
+                JobColumn::Id,
+                JobColumn::Name,
+                JobColumn::Priority,
+                JobColumn::Qos,
+            ],
         }
     }
 
@@ -179,6 +191,55 @@ mod tests {
         assert_eq!(loaded.confirm_before_quit, defaults.confirm_before_quit);
         assert_eq!(loaded.confirm_before_kill, defaults.confirm_before_kill);
         assert_eq!(loaded.external_editor, defaults.external_editor);
+        // regression guard: a config without a `job_columns` key keeps
+        // the historical six columns in the same order
+        assert_eq!(loaded.job_columns, JobColumn::defaults());
+        assert_eq!(
+            loaded.job_columns,
+            vec![
+                JobColumn::Id,
+                JobColumn::Name,
+                JobColumn::Status,
+                JobColumn::Time,
+                JobColumn::Partition,
+                JobColumn::Nodes,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_job_columns_round_trip_as_toml_strings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        let options = non_default_options();
+        options.try_save_to_path(&path).unwrap();
+
+        // the columns are serialized as a TOML array of strings
+        let contents = fs::read_to_string(&path).unwrap();
+        assert!(
+            contents.contains(r#"job_columns = ["id", "name", "priority", "qos"]"#),
+            "unexpected serialization:\n{}",
+            contents
+        );
+
+        let loaded = UserOptions::load_from_path(&path);
+        assert_eq!(loaded.job_columns, options.job_columns);
+    }
+
+    #[test]
+    fn test_unknown_column_name_falls_back_to_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        // an unknown column name makes the whole file unparsable, so
+        // the defaults are used and the file is protected against
+        // being overwritten (same as any other corrupt config)
+        fs::write(&path, "job_columns = [\"id\", \"bogus\"]\n").unwrap();
+
+        let loaded = UserOptions::load_from_path(&path);
+        assert_eq!(loaded, UserOptions::default());
+        assert!(loaded.try_save_to_path(&path).is_err());
     }
 
     #[test]

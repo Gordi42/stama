@@ -5,10 +5,15 @@ use ratatui::{
 };
 use tui_textarea::{CursorMove, TextArea};
 
+use crate::columns::{columns_to_string, parse_columns, JobColumn};
+
 pub enum TextFieldType {
     Text(String),
     Integer(usize),
     Boolean(bool),
+    /// A comma-separated list of job table columns, e.g.
+    /// "id, name, status, time, partition, priority".
+    Columns(Vec<JobColumn>),
 }
 
 /// Text field entry that can be edited
@@ -59,6 +64,13 @@ impl TextField {
             TextFieldType::Text(_) => {
                 self.field_type = TextFieldType::Text(lines);
             }
+            TextFieldType::Columns(_) => {
+                // invalid input never reaches this point: `apply`
+                // validates and resets to the old value instead
+                if let Some(columns) = parse_columns(&lines) {
+                    self.field_type = TextFieldType::Columns(columns);
+                }
+            }
         }
     }
 
@@ -67,6 +79,7 @@ impl TextField {
             TextFieldType::Boolean(b) => bool_to_string(b),
             TextFieldType::Integer(i) => i.to_string(),
             TextFieldType::Text(ref s) => s.clone(),
+            TextFieldType::Columns(ref columns) => columns_to_string(columns),
         };
         self.text_area = TextArea::from([text_content]);
         self.text_area.move_cursor(CursorMove::End);
@@ -84,6 +97,9 @@ impl TextField {
             TextFieldType::Text(_) => {
                 self.active = true;
             }
+            TextFieldType::Columns(_) => {
+                self.active = true;
+            }
         }
     }
 
@@ -98,6 +114,10 @@ impl TextField {
             TextFieldType::Integer(_) => {
                 let lines = self.text_area.lines().join("\n");
                 lines.parse::<usize>().is_ok()
+            }
+            TextFieldType::Columns(_) => {
+                let lines = self.text_area.lines().join("\n");
+                parse_columns(&lines).is_some()
             }
             _ => true,
         };
@@ -218,5 +238,56 @@ impl TextField {
                 false
             }
         }
+    }
+}
+
+// ====================================================================
+//  TESTS
+// ====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set_text(field: &mut TextField, text: &str) {
+        field.text_area = TextArea::from([text.to_string()]);
+    }
+
+    #[test]
+    fn test_columns_field_applies_a_valid_list() {
+        let mut field = TextField::new("Job columns", TextFieldType::Columns(vec![JobColumn::Id]));
+        assert_eq!(field.text_area.lines().join("\n"), "id");
+
+        field.on_enter();
+        assert!(field.active);
+        set_text(&mut field, "id, priority");
+        field.apply();
+
+        assert!(!field.active);
+        match &field.field_type {
+            TextFieldType::Columns(columns) => {
+                assert_eq!(columns, &vec![JobColumn::Id, JobColumn::Priority]);
+            }
+            _ => panic!("expected a Columns field"),
+        }
+    }
+
+    #[test]
+    fn test_columns_field_keeps_old_value_on_invalid_input() {
+        let old_columns = vec![JobColumn::Id, JobColumn::Name];
+        let mut field = TextField::new("Job columns", TextFieldType::Columns(old_columns.clone()));
+
+        field.on_enter();
+        set_text(&mut field, "id, bogus");
+        field.apply();
+
+        // the invalid input is discarded, the old value (and its text)
+        // are restored
+        assert!(!field.active);
+        match &field.field_type {
+            TextFieldType::Columns(columns) => assert_eq!(columns, &old_columns),
+            _ => panic!("expected a Columns field"),
+        }
+        assert_eq!(field.text_area.lines().join("\n"), "id, name");
     }
 }
