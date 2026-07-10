@@ -15,7 +15,7 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: taiki-e/create-gh-release-action@v1
         with:
           # Release body is taken from the matching section of CHANGELOG.md.
@@ -45,7 +45,7 @@ jobs:
             os: ubuntu-22.04-arm
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       # aarch64-unknown-linux-musl does not default to rust's self-contained
       # linking (unlike x86_64), so musl targets need the musl C toolchain.
@@ -73,7 +73,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
