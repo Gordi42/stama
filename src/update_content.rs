@@ -181,6 +181,17 @@ fn get_content(
                 .log_tail(&log_path, LOG_TAIL_LINES)
                 .unwrap_or_else(|e| e.to_string());
         }
+        // seff-style efficiency stats of the selected job, attached to
+        // its entry in the fresh job list so the details pane can render
+        // them; sacct has nothing useful for jobs that have not started,
+        // and the stats are auxiliary, so errors are silently dropped
+        if job.status != JobStatus::Pending {
+            if let Ok(Some(stats)) = scheduler.job_stats(&job.id) {
+                for entry in joblist.iter_mut().filter(|entry| entry.id == job.id) {
+                    entry.stats = Some(Box::new(stats.clone()));
+                }
+            }
+        }
     }
 
     // if a job is JobStatus::Completing (from squeue), sacct may still
@@ -272,8 +283,18 @@ mod tests {
         command: &str,
         options: &UserOptions,
     ) -> Content {
+        tick_until_content_with_job(updater, None, command, options)
+    }
+
+    /// Like [`tick_until_content`], but with a selected job.
+    fn tick_until_content_with_job(
+        updater: &mut ContentUpdater,
+        job: Option<Job>,
+        command: &str,
+        options: &UserOptions,
+    ) -> Content {
         for _ in 0..400 {
-            match updater.tick(None, command.to_string(), options.clone()) {
+            match updater.tick(job.clone(), command.to_string(), options.clone()) {
                 ContentTick::New(content) => return *content,
                 _ => thread::sleep(Duration::from_millis(5)),
             }
@@ -325,6 +346,54 @@ mod tests {
     }
 
     #[test]
+    fn stats_of_selected_job_are_attached_to_its_job_list_entry() {
+        use crate::job::JobStats;
+        let stats = JobStats {
+            cpu_efficiency: Some(0.85),
+            mem_efficiency: Some(0.42),
+            elapsed_frac_of_limit: Some(0.61),
+        };
+        let fake = Arc::new(FakeScheduler {
+            squeue_response: Ok(vec![
+                job("1", JobStatus::Running),
+                job("2", JobStatus::Running),
+            ]),
+            stats_response: Ok(Some(stats.clone())),
+            ..FakeScheduler::default()
+        });
+        let mut updater = ContentUpdater::with_scheduler(fake);
+        let options = UserOptions::default();
+
+        let selected = job("1", JobStatus::Running);
+        let content = tick_until_content_with_job(&mut updater, Some(selected), "squeue", &options);
+
+        // the stats are attached to the selected job's entry only
+        assert_eq!(content.job_list[0].stats, Some(Box::new(stats)));
+        assert_eq!(content.job_list[1].stats, None);
+    }
+
+    #[test]
+    fn stats_are_not_fetched_for_pending_jobs() {
+        use crate::job::JobStats;
+        let fake = Arc::new(FakeScheduler {
+            squeue_response: Ok(vec![job("1", JobStatus::Pending)]),
+            stats_response: Ok(Some(JobStats {
+                cpu_efficiency: Some(1.0),
+                ..JobStats::default()
+            })),
+            ..FakeScheduler::default()
+        });
+        let mut updater = ContentUpdater::with_scheduler(fake);
+        let options = UserOptions::default();
+
+        let selected = job("1", JobStatus::Pending);
+        let content = tick_until_content_with_job(&mut updater, Some(selected), "squeue", &options);
+
+        // pending jobs never started, so no stats are requested/attached
+        assert_eq!(content.job_list[0].stats, None);
+    }
+
+    #[test]
     fn failing_squeue_surfaces_error_in_content() {
         let fake = Arc::new(FakeScheduler {
             squeue_response: Err(SchedulerError::CommandFailed {
@@ -365,6 +434,9 @@ mod tests {
         }
         fn job_details(&self, _job_id: &str) -> Result<String, SchedulerError> {
             Ok(String::new())
+        }
+        fn job_stats(&self, _job_id: &str) -> Result<Option<crate::job::JobStats>, SchedulerError> {
+            Ok(None)
         }
         fn cancel_job(&self, _job_id: &str) -> Result<(), SchedulerError> {
             Ok(())

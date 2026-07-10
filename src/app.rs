@@ -43,6 +43,9 @@ pub enum Action {
     UpdateJobList(JobListAction),
     /// Handles a job action (e.g. kill, open log)
     JobOption(JobActions),
+    /// Quits stama with an "ssh <node>" exit command to the given node
+    /// (emitted by the node selection popup for multi-node jobs)
+    SshToNode(String),
     /// Start the salloc command with the parameters
     StartSalloc(String),
 }
@@ -159,6 +162,10 @@ impl App {
             }
             Action::JobOption(action) => {
                 self.handle_job_action(action.clone());
+            }
+            Action::SshToNode(node) => {
+                let node = node.clone();
+                self.ssh_exit(&node);
             }
             Action::StartSalloc(cmd) => {
                 self.should_execute_command = true;
@@ -388,10 +395,19 @@ impl App {
         self.should_quit = true;
     }
 
-    /// Get the first node in the node list and create a ssh command to it:
-    /// "ssh <node>"
+    /// Sets the exit command to "ssh <node>" and quits stama.
     /// The command will only be executed in the terminal after closing stama
     /// if a wrapper script is used around stama.
+    fn ssh_exit(&mut self, node: &str) {
+        self.exit_command = Some(format!("ssh {}", node));
+        self.should_quit = true;
+    }
+
+    /// Creates an ssh exit command to a node of the selected job.
+    /// A job running on a single node is ssh-ed to directly; for a
+    /// multi-node job the node selection popup offers the full node
+    /// list and its choice comes back as [`Action::SshToNode`], which
+    /// takes the same [`App::ssh_exit`] path as the single-node case.
     fn ssh_to_node(&mut self) {
         // get the current job
         let job = match self.joblist.get_job() {
@@ -410,22 +426,23 @@ impl App {
             return;
         }
         // get the node list of the job; the scheduler expands Slurm's
-        // compressed node list, so `nodes` contains every node of the
-        // job. For now the first node is used; a node-selection popup
-        // (offering the full list when nodes.len() > 1) can hook in
-        // here once the Menu trait refactor lands.
+        // compressed node list, so `nodes` contains every node of the job
         match self.scheduler.job_nodes(&job.id) {
-            Ok(nodes) => match nodes.first() {
-                Some(node) => {
-                    // set the exit command to the ssh command and set
-                    // the exit flag to true
-                    self.exit_command = Some(format!("ssh {}", node));
-                    self.should_quit = true;
-                }
-                None => {
+            Ok(nodes) => {
+                if nodes.len() > 1 {
+                    // several nodes: let the user pick one in the
+                    // node selection popup
+                    let job_id = job.id.clone();
+                    self.menus
+                        .activate_menu(OpenMenu::NodeSelect { job_id, nodes }, &self.joblist);
+                } else if let Some(node) = nodes.first() {
+                    // exactly one node: ssh to it directly
+                    let node = node.clone();
+                    self.ssh_exit(&node);
+                } else {
                     self.open_error_message("Error getting node list: no node found");
                 }
-            },
+            }
             Err(error) => {
                 // print an error message if the squeue command to get the
                 // node list failed
@@ -605,5 +622,67 @@ mod tests {
         assert!(app.menus.message.is_open());
         assert!(app.menus.message.text.contains("Error killing job"));
         assert!(app.menus.message.text.contains("Access/permission denied"));
+    }
+
+    /// Creates an app whose selected job is running and whose fake
+    /// scheduler reports the given nodes for it.
+    fn app_with_nodes(nodes: Vec<&str>) -> App {
+        let fake = Arc::new(FakeScheduler {
+            nodes_response: Ok(nodes.into_iter().map(String::from).collect()),
+            ..FakeScheduler::default()
+        });
+        let mut app = app_with_fake(fake);
+        // new_default() creates a running job, so ssh is possible
+        app.joblist.jobs.push(Job::new_default());
+        app
+    }
+
+    #[test]
+    fn ssh_to_single_node_job_sets_the_exit_command_directly() {
+        let mut app = app_with_nodes(vec!["gpu1"]);
+
+        app.action = Action::JobOption(JobActions::SSH(Job::new_default()));
+        app.handle_action();
+
+        // one node: no popup, the ssh exit command is set immediately
+        assert!(!app.menus.node_select_menu.is_open());
+        assert_eq!(app.exit_command.as_deref(), Some("ssh gpu1"));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ssh_to_multi_node_job_opens_the_node_selection_popup() {
+        let mut app = app_with_nodes(vec!["gpu1", "gpu3", "mem1"]);
+
+        app.action = Action::JobOption(JobActions::SSH(Job::new_default()));
+        app.handle_action();
+
+        // several nodes: the popup opens instead of quitting
+        assert!(app.menus.node_select_menu.is_open());
+        assert_eq!(
+            app.menus.node_select_menu.nodes,
+            vec!["gpu1", "gpu3", "mem1"]
+        );
+        assert!(app.exit_command.is_none());
+        assert!(!app.should_quit);
+
+        // the popup's selection takes the same exit-command path
+        app.action = Action::SshToNode("gpu3".to_string());
+        app.handle_action();
+        assert_eq!(app.exit_command.as_deref(), Some("ssh gpu3"));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ssh_with_empty_node_list_opens_an_error_message() {
+        let mut app = app_with_nodes(vec![]);
+
+        app.action = Action::JobOption(JobActions::SSH(Job::new_default()));
+        app.handle_action();
+
+        assert!(!app.menus.node_select_menu.is_open());
+        assert!(app.exit_command.is_none());
+        assert!(app.menus.message.is_open());
+        assert!(app.menus.message.text.contains("no node found"));
     }
 }

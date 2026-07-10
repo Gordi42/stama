@@ -16,7 +16,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::process::Command;
 
-use crate::job::{Job, JobStatus};
+use crate::job::{Job, JobStats, JobStatus};
 
 // ====================================================================
 //  ERROR TYPE
@@ -72,6 +72,12 @@ pub trait Scheduler: Send + Sync {
 
     /// Returns the detail text of a job ("scontrol show job <id>").
     fn job_details(&self, job_id: &str) -> Result<String, SchedulerError>;
+
+    /// Returns seff-style efficiency stats of a job, computed from
+    /// sacct output. `Ok(None)` means sacct has no record of the job
+    /// (yet); individual [`JobStats`] components are `None` when the
+    /// underlying fields are missing or unparsable.
+    fn job_stats(&self, job_id: &str) -> Result<Option<JobStats>, SchedulerError>;
 
     /// Cancels a job ("scancel <id>"). A successful return only means
     /// the cancel request was accepted, not that the job is gone.
@@ -130,6 +136,20 @@ impl Scheduler for SlurmScheduler {
         run_command("scontrol", &args)
     }
 
+    fn job_stats(&self, job_id: &str) -> Result<Option<JobStats>, SchedulerError> {
+        // the field order must match the parsing in parse_job_stats
+        let args = [
+            "-j",
+            job_id,
+            "--parsable2",
+            "-n",
+            "--format=JobID,State,TotalCPU,Elapsed,AllocCPUS,MaxRSS,ReqMem,Timelimit,NNodes",
+        ]
+        .map(str::to_string);
+        let output = run_command("sacct", &args)?;
+        Ok(parse_job_stats(&output, job_id))
+    }
+
     fn cancel_job(&self, job_id: &str) -> Result<(), SchedulerError> {
         run_command("scancel", &[job_id.to_string()])?;
         Ok(())
@@ -183,6 +203,7 @@ fn squeue_format_arg() -> String {
         "WorkDir:256",
         "Command:256",
         "StdOut:256",
+        "Reason:64",
     ];
     // "|%|" is used as the field delimiter; it is attached as a suffix
     // to every field except the last
@@ -393,16 +414,16 @@ pub fn read_last_lines(path: &str, lines: usize) -> Result<String, SchedulerErro
 ///
 /// The field order must match the `--Format` list built in
 /// [`squeue_format_arg`]: JobID, Name, StateCompact, TimeUsed,
-/// PendingTime, Partition, NumNodes, WorkDir, Command, StdOut.
+/// PendingTime, Partition, NumNodes, WorkDir, Command, StdOut, Reason.
 pub fn format_squeue_output(output: &str) -> Vec<Job> {
     let mut joblist = vec![];
     for line in output.lines().skip(1) {
         let parts = line.split("|%|").map(|s| s.trim()).collect::<Vec<&str>>();
-        // A well-formed line has 10 fields separated by 9 "|%|" delimiters
+        // A well-formed line has 11 fields separated by 10 "|%|" delimiters
         // (the --Format suffix is attached to every entry except the last),
-        // so splitting yields exactly 10 parts. Skip anything shorter
+        // so splitting yields exactly 11 parts. Skip anything shorter
         // (error messages, help text, truncated output) instead of panicking.
-        if parts.len() < 10 {
+        if parts.len() < 11 {
             continue;
         }
         let id = parts[0].to_string();
@@ -422,8 +443,15 @@ pub fn format_squeue_output(output: &str) -> Vec<Job> {
         let workdir = parts[7].to_string();
         let command = parts[8].to_string();
         let output = parts[9].to_string();
+        // the Reason is only meaningful for pending jobs; squeue
+        // reports "None" for jobs that are not waiting on anything
+        let reason = match parts[10] {
+            "" => None,
+            _ if status != JobStatus::Pending => None,
+            r => Some(r.to_string()),
+        };
 
-        joblist.push(Job::new(
+        let mut job = Job::new(
             &id,
             &name,
             status,
@@ -433,7 +461,9 @@ pub fn format_squeue_output(output: &str) -> Vec<Job> {
             &workdir,
             &command,
             Some(output),
-        ));
+        );
+        job.reason = reason;
+        joblist.push(job);
     }
     joblist
 }
@@ -510,6 +540,153 @@ fn format_time_pending(time_str: &str) -> String {
 }
 
 // ====================================================================
+//  EFFICIENCY STATS (seff-style) PARSING
+// ====================================================================
+
+/// Parses a Slurm duration into seconds.
+///
+/// Handles the forms found in the sacct TotalCPU / Elapsed / Timelimit
+/// columns: "D-HH:MM:SS", "HH:MM:SS", "MM:SS" and "MM:SS.mmm" (TotalCPU
+/// carries fractional seconds). Returns `None` for non-durations such
+/// as "UNLIMITED", "Partition_Limit" or an empty field.
+pub fn parse_slurm_duration(text: &str) -> Option<f64> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    // an optional "D-" day prefix
+    let (days, rest) = match text.split_once('-') {
+        Some((day_str, rest)) => (day_str.parse::<u64>().ok()? as f64, rest),
+        None => (0.0, text),
+    };
+    let parts: Vec<&str> = rest.split(':').collect();
+    let (hours, minutes, seconds) = match parts.len() {
+        3 => (
+            parts[0].parse::<u64>().ok()? as f64,
+            parts[1].parse::<u64>().ok()? as f64,
+            parse_seconds(parts[2])?,
+        ),
+        2 => (
+            0.0,
+            parts[0].parse::<u64>().ok()? as f64,
+            parse_seconds(parts[1])?,
+        ),
+        1 => (0.0, 0.0, parse_seconds(parts[0])?),
+        _ => return None,
+    };
+    Some(days * 86400.0 + hours * 3600.0 + minutes * 60.0 + seconds)
+}
+
+/// Parses a (possibly fractional) non-negative seconds field.
+fn parse_seconds(text: &str) -> Option<f64> {
+    let value = text.parse::<f64>().ok()?;
+    if value.is_finite() && value >= 0.0 {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+/// Parses a memory size with an optional K/M/G/T suffix into bytes,
+/// e.g. sacct MaxRSS values like "12345K", "4.5G" or "0". A plain
+/// number is taken as bytes. Returns `None` for empty or garbage input.
+pub fn parse_mem_size(text: &str) -> Option<f64> {
+    let text = text.trim();
+    let (number, multiplier) = match text.chars().last()?.to_ascii_uppercase() {
+        'K' => (&text[..text.len() - 1], 1024.0),
+        'M' => (&text[..text.len() - 1], 1024.0 * 1024.0),
+        'G' => (&text[..text.len() - 1], 1024.0 * 1024.0 * 1024.0),
+        'T' => (&text[..text.len() - 1], 1024.0 * 1024.0 * 1024.0 * 1024.0),
+        c if c.is_ascii_digit() => (text, 1.0),
+        _ => return None,
+    };
+    let value = number.parse::<f64>().ok()?;
+    if value.is_finite() && value >= 0.0 {
+        Some(value * multiplier)
+    } else {
+        None
+    }
+}
+
+/// Parses a sacct ReqMem value into the *total* requested bytes of the
+/// job.
+///
+/// Older Slurm versions append the unit "n" (per node) or "c" (per
+/// CPU), e.g. "4000Mn" or "16Gc"; the per-unit value is multiplied by
+/// the node/CPU count. Newer versions (>= 21.08) report the total
+/// requested memory without a suffix, e.g. "16G".
+pub fn parse_req_mem(text: &str, nodes: u32, cpus: u32) -> Option<f64> {
+    let text = text.trim();
+    let (size, count) = if let Some(size) = text.strip_suffix(['n', 'N']) {
+        (size, nodes as f64)
+    } else if let Some(size) = text.strip_suffix(['c', 'C']) {
+        (size, cpus as f64)
+    } else {
+        (text, 1.0)
+    };
+    Some(parse_mem_size(size)? * count)
+}
+
+/// Parses the output of the sacct stats query into [`JobStats`].
+///
+/// The field order must match the `--format` list in
+/// [`SlurmScheduler::job_stats`]:
+/// JobID|State|TotalCPU|Elapsed|AllocCPUS|MaxRSS|ReqMem|Timelimit|NNodes
+/// (--parsable2: '|'-separated, no trailing delimiter; -n: no header).
+///
+/// The job-level values come from the row whose JobID equals `job_id`;
+/// MaxRSS is only recorded on the step rows (".batch" etc.), so the
+/// maximum across all rows is used. Returns `None` when sacct has no
+/// row for the job; components are `None` when their fields are
+/// missing, unparsable or would divide by zero.
+pub fn parse_job_stats(output: &str, job_id: &str) -> Option<JobStats> {
+    let mut main_row: Option<Vec<String>> = None;
+    let mut max_rss: Option<f64> = None;
+    for line in output.lines() {
+        let fields: Vec<&str> = line.split('|').collect();
+        if fields.len() < 9 {
+            continue;
+        }
+        if fields[0].trim() == job_id {
+            main_row = Some(fields.iter().map(|f| f.trim().to_string()).collect());
+        }
+        // MaxRSS lives on the step rows; take the maximum across steps
+        if let Some(rss) = parse_mem_size(fields[5]) {
+            max_rss = Some(max_rss.map_or(rss, |current: f64| current.max(rss)));
+        }
+    }
+    let main_row = main_row?;
+
+    let total_cpu = parse_slurm_duration(&main_row[2]);
+    let elapsed = parse_slurm_duration(&main_row[3]);
+    let alloc_cpus = main_row[4].parse::<u32>().ok();
+    let nodes = main_row[8].parse::<u32>().unwrap_or(0);
+    let req_mem = parse_req_mem(&main_row[6], nodes, alloc_cpus.unwrap_or(0));
+    let time_limit = parse_slurm_duration(&main_row[7]);
+
+    let cpu_efficiency = match (total_cpu, elapsed, alloc_cpus) {
+        (Some(used), Some(elapsed), Some(cpus)) if elapsed > 0.0 && cpus > 0 => {
+            Some(used / (elapsed * cpus as f64))
+        }
+        _ => None,
+    };
+    let mem_efficiency = match (max_rss, req_mem) {
+        (Some(rss), Some(requested)) if requested > 0.0 => Some(rss / requested),
+        _ => None,
+    };
+    let elapsed_frac_of_limit = match (elapsed, time_limit) {
+        (Some(elapsed), Some(limit)) if limit > 0.0 => Some(elapsed / limit),
+        _ => None,
+    };
+
+    Some(JobStats {
+        cpu_efficiency,
+        mem_efficiency,
+        elapsed_frac_of_limit,
+    })
+}
+
+// ====================================================================
 //  FAKE IMPLEMENTATION FOR TESTS
 // ====================================================================
 
@@ -520,6 +697,7 @@ pub struct FakeScheduler {
     pub squeue_response: Result<Vec<Job>, SchedulerError>,
     pub sacct_response: Result<Vec<Job>, SchedulerError>,
     pub details_response: Result<String, SchedulerError>,
+    pub stats_response: Result<Option<JobStats>, SchedulerError>,
     pub cancel_response: Result<(), SchedulerError>,
     pub nodes_response: Result<Vec<String>, SchedulerError>,
     pub log_response: Result<String, SchedulerError>,
@@ -538,6 +716,7 @@ impl Default for FakeScheduler {
             squeue_response: Ok(Vec::new()),
             sacct_response: Ok(Vec::new()),
             details_response: Ok(String::new()),
+            stats_response: Ok(None),
             cancel_response: Ok(()),
             nodes_response: Ok(Vec::new()),
             log_response: Ok(String::new()),
@@ -568,6 +747,10 @@ impl Scheduler for FakeScheduler {
 
     fn job_details(&self, _job_id: &str) -> Result<String, SchedulerError> {
         self.details_response.clone()
+    }
+
+    fn job_stats(&self, _job_id: &str) -> Result<Option<JobStats>, SchedulerError> {
+        self.stats_response.clone()
     }
 
     fn cancel_job(&self, job_id: &str) -> Result<(), SchedulerError> {
@@ -633,17 +816,17 @@ mod tests {
     // ----------------------------------------------------------------
     // Field order must match the --Format list in squeue_format_arg:
     // JobID, Name, StateCompact, TimeUsed, PendingTime, Partition,
-    // NumNodes, WorkDir, Command, StdOut
+    // NumNodes, WorkDir, Command, StdOut, Reason
     // The "|%|" suffix is attached to every field except the last, so a
-    // line has 10 fields and 9 delimiters. The first line is the header.
+    // line has 11 fields and 10 delimiters. The first line is the header.
 
-    fn squeue_line(fields: [&str; 10]) -> String {
+    fn squeue_line(fields: [&str; 11]) -> String {
         fields.join("|%|")
     }
 
     #[test]
     fn format_squeue_output_parses_running_and_pending_jobs() {
-        let header = "JOBID|%|NAME|%|ST|%|TIME|%|PENDING_TIME|%|PARTITION|%|NODES|%|WORK_DIR|%|COMMAND|%|STDOUT";
+        let header = "JOBID|%|NAME|%|ST|%|TIME|%|PENDING_TIME|%|PARTITION|%|NODES|%|WORK_DIR|%|COMMAND|%|STDOUT|%|REASON";
         let running = squeue_line([
             "1234 ",
             " job_running ",
@@ -655,6 +838,7 @@ mod tests {
             "/work ",
             "/work/run.sh ",
             "/work/out-%j.log ",
+            "None ",
         ]);
         let pending = squeue_line([
             "5678",
@@ -667,6 +851,7 @@ mod tests {
             "/work2",
             "/work2/run.sh",
             "/work2/out.log",
+            "Priority",
         ]);
         let output = format!("{}\n{}\n{}\n", header, running, pending);
 
@@ -683,12 +868,38 @@ mod tests {
         assert_eq!(jobs[0].workdir, "/work");
         assert_eq!(jobs[0].command, "/work/run.sh");
         assert_eq!(jobs[0].output.as_deref(), Some("/work/out-%j.log"));
+        // the reason is only stored for pending jobs
+        assert_eq!(jobs[0].reason, None);
 
         assert_eq!(jobs[1].id, "5678");
         assert_eq!(jobs[1].status, JobStatus::Pending);
         // pending jobs use PendingTime (seconds): 3661 s = 1 h 1 min 1 s
         assert_eq!(jobs[1].time, "0-01:01:01");
         assert_eq!(jobs[1].nodes, 2);
+        assert_eq!(jobs[1].reason.as_deref(), Some("Priority"));
+    }
+
+    #[test]
+    fn format_squeue_output_keeps_pending_reason_none_verbatim() {
+        // a pending job whose reason squeue reports as "None" (freshly
+        // submitted) keeps the raw value; the display layer maps it
+        let header = "H";
+        let pending = squeue_line([
+            "1", "job", "PD", "0:00", "5", "gpu", "1", "/w", "/w/r.sh", "/w/o.log", "None",
+        ]);
+        let output = format!("{}\n{}\n", header, pending);
+        let jobs = format_squeue_output(&output);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].reason.as_deref(), Some("None"));
+
+        // an empty reason field stays None
+        let pending = squeue_line([
+            "1", "job", "PD", "0:00", "5", "gpu", "1", "/w", "/w/r.sh", "/w/o.log", "",
+        ]);
+        let output = format!("{}\n{}\n", header, pending);
+        let jobs = format_squeue_output(&output);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].reason, None);
     }
 
     // ----------------------------------------------------------------
@@ -756,6 +967,158 @@ mod tests {
         assert_eq!(format_time_pending(""), "0-00:00:00");
         assert_eq!(format_time_pending("garbage"), "0-00:00:00");
         assert_eq!(format_time_pending("-5"), "0-00:00:00");
+    }
+
+    // ----------------------------------------------------------------
+    // duration parsing (sacct TotalCPU / Elapsed / Timelimit)
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn parse_slurm_duration_all_forms() {
+        // D-HH:MM:SS
+        assert_eq!(parse_slurm_duration("1-02:03:04"), Some(93784.0));
+        // HH:MM:SS
+        assert_eq!(parse_slurm_duration("02:03:04"), Some(7384.0));
+        // MM:SS with fractional seconds (TotalCPU form)
+        assert_eq!(parse_slurm_duration("03:04.567"), Some(184.567));
+        assert_eq!(parse_slurm_duration("00:00.123"), Some(0.123));
+        // MM:SS without fraction
+        assert_eq!(parse_slurm_duration("03:04"), Some(184.0));
+        // bare seconds
+        assert_eq!(parse_slurm_duration("42"), Some(42.0));
+        assert_eq!(parse_slurm_duration(" 00:00:00 "), Some(0.0));
+    }
+
+    #[test]
+    fn parse_slurm_duration_rejects_non_durations() {
+        assert_eq!(parse_slurm_duration(""), None);
+        assert_eq!(parse_slurm_duration("UNLIMITED"), None);
+        assert_eq!(parse_slurm_duration("Partition_Limit"), None);
+        assert_eq!(parse_slurm_duration("INVALID"), None);
+        assert_eq!(parse_slurm_duration("-5"), None);
+        assert_eq!(parse_slurm_duration("1:2:3:4"), None);
+        assert_eq!(parse_slurm_duration("NaN"), None);
+    }
+
+    // ----------------------------------------------------------------
+    // memory size parsing (sacct MaxRSS / ReqMem)
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn parse_mem_size_suffixes() {
+        assert_eq!(parse_mem_size("0"), Some(0.0));
+        assert_eq!(parse_mem_size("1024"), Some(1024.0));
+        assert_eq!(parse_mem_size("2K"), Some(2048.0));
+        assert_eq!(parse_mem_size("12345K"), Some(12345.0 * 1024.0));
+        assert_eq!(parse_mem_size("4M"), Some(4.0 * 1024.0 * 1024.0));
+        assert_eq!(parse_mem_size("1.5G"), Some(1.5 * 1024.0 * 1024.0 * 1024.0));
+        assert_eq!(
+            parse_mem_size("2T"),
+            Some(2.0 * 1024.0 * 1024.0 * 1024.0 * 1024.0)
+        );
+        // lowercase suffixes appear in some Slurm versions
+        assert_eq!(parse_mem_size("2k"), Some(2048.0));
+        assert_eq!(parse_mem_size(" 16G "), Some(16.0 * 1024.0f64.powi(3)));
+    }
+
+    #[test]
+    fn parse_mem_size_rejects_garbage() {
+        assert_eq!(parse_mem_size(""), None);
+        assert_eq!(parse_mem_size("K"), None);
+        assert_eq!(parse_mem_size("garbage"), None);
+        assert_eq!(parse_mem_size("-4K"), None);
+        assert_eq!(parse_mem_size("16Q"), None);
+    }
+
+    #[test]
+    fn parse_req_mem_per_node_per_cpu_and_total() {
+        let gib = 1024.0f64.powi(3);
+        let mib = 1024.0f64.powi(2);
+        // "Mn": per node, multiplied by the node count
+        assert_eq!(parse_req_mem("4000Mn", 2, 8), Some(2.0 * 4000.0 * mib));
+        // "Gc": per CPU, multiplied by the CPU count
+        assert_eq!(parse_req_mem("16Gc", 2, 8), Some(8.0 * 16.0 * gib));
+        // plain form (Slurm >= 21.08): the total requested memory
+        assert_eq!(parse_req_mem("16G", 2, 8), Some(16.0 * gib));
+        // a zero node count yields 0 total; the caller guards div-by-zero
+        assert_eq!(parse_req_mem("4000Mn", 0, 0), Some(0.0));
+        // garbage and empty input
+        assert_eq!(parse_req_mem("", 1, 1), None);
+        assert_eq!(parse_req_mem("n", 1, 1), None);
+        assert_eq!(parse_req_mem("garbagen", 1, 1), None);
+    }
+
+    // ----------------------------------------------------------------
+    // parse_job_stats
+    // ----------------------------------------------------------------
+    // Field order must match the --format list in job_stats:
+    // JobID|State|TotalCPU|Elapsed|AllocCPUS|MaxRSS|ReqMem|Timelimit|NNodes
+
+    #[test]
+    fn parse_job_stats_completed_job_with_batch_step() {
+        // 4 CPUs, 1 h elapsed, 2 h of CPU time used -> 50 % CPU efficiency
+        // MaxRSS (on the .batch step) 2 GiB of 8 GiB requested -> 25 %
+        // 1 h elapsed of a 2 h limit -> 50 %
+        let output = "\
+1001|COMPLETED|02:00:00|01:00:00|4||8Gn|02:00:00|1
+1001.batch|COMPLETED|01:59:58|01:00:00|4|2097152K|8Gn|02:00:00|1
+1001.extern|COMPLETED|00:00:00|01:00:00|4|1024K|8Gn|02:00:00|1
+";
+        let stats = parse_job_stats(output, "1001").unwrap();
+        assert!((stats.cpu_efficiency.unwrap() - 0.5).abs() < 1e-9);
+        assert!((stats.mem_efficiency.unwrap() - 0.25).abs() < 1e-9);
+        assert!((stats.elapsed_frac_of_limit.unwrap() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_job_stats_per_cpu_req_mem_and_fractional_total_cpu() {
+        // 2 CPUs at 1 Gc -> 2 GiB total; MaxRSS 1 GiB -> 50 % mem
+        // TotalCPU "30:00.500" = 1800.5 s of 2 * 3600 s -> ~25 % CPU
+        let output = "\
+2002|RUNNING|30:00.500|01:00:00|2||1Gc|04:00:00|1
+2002.batch|RUNNING|30:00.500|01:00:00|2|1048576K|1Gc|04:00:00|1
+";
+        let stats = parse_job_stats(output, "2002").unwrap();
+        assert!((stats.cpu_efficiency.unwrap() - 1800.5 / 7200.0).abs() < 1e-9);
+        assert!((stats.mem_efficiency.unwrap() - 0.5).abs() < 1e-9);
+        assert!((stats.elapsed_frac_of_limit.unwrap() - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_job_stats_pending_job_has_no_components() {
+        // a pending job: zero elapsed time, no steps, no MaxRSS
+        let output = "3003|PENDING|00:00:00|00:00:00|0||4000Mn|01:00:00|0\n";
+        let stats = parse_job_stats(output, "3003").unwrap();
+        // zero elapsed/CPUs must not divide by zero
+        assert_eq!(stats.cpu_efficiency, None);
+        // no MaxRSS row and 0 nodes * 4000M = 0 requested
+        assert_eq!(stats.mem_efficiency, None);
+        // 0 s elapsed of a 1 h limit is a valid 0 %
+        assert_eq!(stats.elapsed_frac_of_limit, Some(0.0));
+    }
+
+    #[test]
+    fn parse_job_stats_unlimited_time_limit_yields_no_time_frac() {
+        let output = "\
+4004|RUNNING|01:00:00|01:00:00|1||4G|UNLIMITED|1
+4004.batch|RUNNING|01:00:00|01:00:00|1|1G|4G|UNLIMITED|1
+";
+        let stats = parse_job_stats(output, "4004").unwrap();
+        assert!((stats.cpu_efficiency.unwrap() - 1.0).abs() < 1e-9);
+        assert!((stats.mem_efficiency.unwrap() - 0.25).abs() < 1e-9);
+        assert_eq!(stats.elapsed_frac_of_limit, None);
+    }
+
+    #[test]
+    fn parse_job_stats_missing_job_or_garbage_is_none() {
+        assert_eq!(parse_job_stats("", "1001"), None);
+        assert_eq!(parse_job_stats("garbage\n\n", "1001"), None);
+        // rows of a different job do not match
+        let output = "9999|COMPLETED|01:00:00|01:00:00|1|1G|4G|02:00:00|1\n";
+        assert_eq!(parse_job_stats(output, "1001"), None);
+        // the step row alone (id "1001.batch") is not the main row
+        let output = "1001.batch|COMPLETED|01:00:00|01:00:00|1|1G|4G|02:00:00|1\n";
+        assert_eq!(parse_job_stats(output, "1001"), None);
     }
 
     // ----------------------------------------------------------------

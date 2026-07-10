@@ -11,6 +11,7 @@ use crate::menus::{
     job_actions::JobActionsMenu,
     job_overview::JobOverview,
     message::Message,
+    node_select::NodeSelectMenu,
     user_options_menu::UserOptionsMenu,
 };
 use crate::mouse_input::MouseInput;
@@ -23,6 +24,7 @@ pub mod help;
 pub mod job_actions;
 pub mod job_overview;
 pub mod message;
+pub mod node_select;
 pub mod salloc;
 pub mod user_options_menu;
 
@@ -32,6 +34,11 @@ pub enum OpenMenu {
     Help(HelpContext),
     Salloc,
     JobActions,
+    /// The node selection popup for ssh-ing into a multi-node job
+    NodeSelect {
+        job_id: String,
+        nodes: Vec<String>,
+    },
     Message(message::Message),
 }
 
@@ -131,6 +138,8 @@ pub struct MenuContainer {
     /// A menu that shows the available action for the
     /// selected job
     pub job_actions_menu: JobActionsMenu,
+    /// A popup to pick one node of a multi-node job to ssh to
+    pub node_select_menu: NodeSelectMenu,
     /// A menu for allocating jobs (salloc)
     pub salloc_menu: SallocMenu,
     /// A menu that shows the configurable user options
@@ -153,6 +162,7 @@ impl MenuContainer {
         Self {
             job_overview: JobOverview::new(user_options.refresh_rate, &joblist.squeue_command),
             job_actions_menu: JobActionsMenu::new(),
+            node_select_menu: NodeSelectMenu::new(),
             salloc_menu: SallocMenu::new(),
             help_menu: HelpMenu::new(),
             message: Message::new_disabled(),
@@ -170,13 +180,16 @@ impl MenuContainer {
     /// The popup menus in front-to-back order (the most modal first).
     /// Rendering, keyboard input and mouse input all derive from this
     /// single ordering, so keys and clicks always go to the same menu.
-    fn popups_front_to_back(&mut self) -> [&mut dyn Menu; 6] {
+    fn popups_front_to_back(&mut self) -> [&mut dyn Menu; 7] {
         [
             &mut self.confirmation,
             &mut self.message,
             &mut self.help_menu,
             &mut self.user_options_menu,
             &mut self.salloc_menu,
+            // the node selection opens on top of the job actions menu
+            // (which closes itself when it emits the ssh action)
+            &mut self.node_select_menu,
             &mut self.job_actions_menu,
         ]
     }
@@ -192,6 +205,9 @@ impl MenuContainer {
             }
             OpenMenu::UserOptions => {
                 self.user_options_menu.activate();
+            }
+            OpenMenu::NodeSelect { job_id, nodes } => {
+                self.node_select_menu.activate(&job_id, nodes);
             }
             OpenMenu::Message(message) => {
                 self.message = message;
@@ -414,6 +430,37 @@ mod tests {
 
         assert!(!container.confirmation.is_open());
         assert!(container.message.is_open());
+    }
+
+    /// An open node selection popup consumes key input: navigation
+    /// keys move its selection instead of falling through to the job
+    /// overview, and Enter emits the ssh action for the chosen node.
+    #[test]
+    fn test_open_node_select_consumes_key_input() {
+        let mut container = container();
+        container.activate_menu(
+            OpenMenu::NodeSelect {
+                job_id: "4242".to_string(),
+                nodes: vec!["gpu1".to_string(), "gpu3".to_string()],
+            },
+            &JobList::new(),
+        );
+        assert!(container.node_select_menu.is_open());
+
+        let mut action = Action::None;
+        container.input(&mut action, key(KeyCode::Char('j')));
+
+        // the popup consumed the key: the selection moved and no
+        // action leaked through to the base screen
+        assert_eq!(container.node_select_menu.index, 1);
+        assert!(matches!(action, Action::None));
+
+        container.input(&mut action, key(KeyCode::Enter));
+        match action {
+            Action::SshToNode(node) => assert_eq!(node, "gpu3"),
+            other => panic!("expected Action::SshToNode, got {:?}", other),
+        }
+        assert!(!container.node_select_menu.is_open());
     }
 
     /// Confirming the dialog with 'y' emits the stored action

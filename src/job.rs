@@ -43,6 +43,30 @@ impl std::fmt::Display for JobStatus {
     }
 }
 
+/// seff-style efficiency figures of a job, computed from sacct output
+/// (see `Scheduler::job_stats`). Every component is `None` when the
+/// underlying sacct fields are missing or unparsable (e.g. for jobs
+/// that have not started yet).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct JobStats {
+    /// TotalCPU / (Elapsed * AllocCPUS): the fraction of the allocated
+    /// CPU time that was actually used (1.0 = 100 %).
+    pub cpu_efficiency: Option<f64>,
+    /// MaxRSS / total requested memory (1.0 = 100 %).
+    pub mem_efficiency: Option<f64>,
+    /// Elapsed / Timelimit: how much of the time limit is used up.
+    pub elapsed_frac_of_limit: Option<f64>,
+}
+
+impl JobStats {
+    /// Whether at least one component is available for display.
+    pub fn has_any(&self) -> bool {
+        self.cpu_efficiency.is_some()
+            || self.mem_efficiency.is_some()
+            || self.elapsed_frac_of_limit.is_some()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Job {
     pub id: String,             // the job id
@@ -54,6 +78,11 @@ pub struct Job {
     pub workdir: String,        // the working directory of the job
     pub command: String,        // the command the job is running
     pub output: Option<String>, // the output of the job
+    /// The squeue "Reason" of the job (only meaningful for Pending).
+    pub reason: Option<String>,
+    /// seff-style efficiency stats (filled in for the selected job).
+    /// Boxed to keep `Job` (which is embedded in action enums) small.
+    pub stats: Option<Box<JobStats>>,
 }
 
 // ====================================================================
@@ -84,6 +113,8 @@ impl Job {
             workdir: workdir.to_string(),
             command: command.to_string(),
             output,
+            reason: None,
+            stats: None,
         }
     }
 
@@ -99,8 +130,66 @@ impl Job {
             workdir: "/home/user".to_string(),
             command: "/path/to/script".to_string(),
             output: None,
+            reason: None,
+            stats: None,
         }
     }
+}
+
+// ====================================================================
+//  PENDING-REASON EXPLANATIONS
+// ====================================================================
+
+/// Extracts the bare reason code from a raw squeue "Reason" value.
+///
+/// squeue may append details after the code, e.g.
+/// "ReqNodeNotAvail, UnavailableNodes:n[1-2]" or "(Priority)"; the code
+/// is the leading run of alphanumeric characters and underscores.
+pub fn reason_code(raw: &str) -> &str {
+    let trimmed = raw.trim().trim_start_matches('(');
+    let end = trimmed
+        .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .unwrap_or(trimmed.len());
+    &trimmed[..end]
+}
+
+/// Maps a Slurm pending-reason code to a one-line plain-English
+/// explanation. Returns `None` for unknown codes (the caller then
+/// shows the raw code instead).
+pub fn explain_reason(code: &str) -> Option<&'static str> {
+    let explanation = match code {
+        "" | "None" => "waiting for the scheduler to evaluate the job",
+        "Priority" => "waiting: higher-priority jobs are ahead in the queue",
+        "Resources" => "waiting for the requested resources (nodes/CPUs/GPUs) to become free",
+        "Dependency" => "waiting for a job dependency to finish",
+        "DependencyNeverSatisfied" => {
+            "a dependency failed and can never be satisfied; the job will never start"
+        }
+        "QOSMaxCpuPerUserLimit" => {
+            "your per-user CPU limit of this QOS is reached; waits until your other jobs free CPUs"
+        }
+        "QOSMaxGRESPerUser" => "your per-user GPU/GRES limit of this QOS is reached",
+        "QOSGrpCpuLimit" => "the group CPU limit of this QOS is reached",
+        "QOSGrpGRES" => "the group GPU/GRES limit of this QOS is reached",
+        "AssocGrpCpuLimit" => "your association/account has reached its CPU limit",
+        "AssocGrpGRES" => "your association/account has reached its GPU/GRES limit",
+        "AssocGrpGRESMinutes" => "your association/account has used up its GPU/GRES-minutes budget",
+        "PartitionNodeLimit" => "the job requests more nodes than this partition allows",
+        "PartitionTimeLimit" => "the job requests more time than this partition allows",
+        "ReqNodeNotAvail" => {
+            "a requested node is not available (down, drained or reserved, e.g. for maintenance)"
+        }
+        "BeginTime" => "the requested start time of the job has not been reached yet",
+        "JobHeldUser" => "the job is held by the user; release it with 'scontrol release <jobid>'",
+        "JobHeldAdmin" => "the job is held by an administrator",
+        "NodeDown" => "a node required by the job is down",
+        "BadConstraints" => "the constraints of the job cannot be satisfied by any node",
+        "launch_failed_requeued_held" => {
+            "the job launch failed (often a node problem); it was requeued and held"
+        }
+        _ => return None,
+    };
+    Some(explanation)
 }
 
 // ====================================================================
@@ -229,6 +318,88 @@ mod tests {
             job("123456", "myjob", Some("%2j.out")).get_stdout(),
             Some("123456.out".to_string())
         );
+    }
+
+    // ----------------------------------------------------------------
+    // pending-reason explanations
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn test_reason_code_extraction() {
+        assert_eq!(reason_code("Priority"), "Priority");
+        assert_eq!(reason_code("(Priority)"), "Priority");
+        assert_eq!(reason_code("  Resources "), "Resources");
+        // trailing details after the code are stripped
+        assert_eq!(
+            reason_code("ReqNodeNotAvail, UnavailableNodes:n[1-2]"),
+            "ReqNodeNotAvail"
+        );
+        // underscores belong to the code
+        assert_eq!(
+            reason_code("launch_failed_requeued_held"),
+            "launch_failed_requeued_held"
+        );
+        assert_eq!(reason_code(""), "");
+    }
+
+    #[test]
+    fn test_explain_reason_known_codes() {
+        // every code of the map yields an explanation
+        for code in [
+            "Priority",
+            "Resources",
+            "Dependency",
+            "DependencyNeverSatisfied",
+            "QOSMaxCpuPerUserLimit",
+            "QOSMaxGRESPerUser",
+            "QOSGrpCpuLimit",
+            "QOSGrpGRES",
+            "AssocGrpCpuLimit",
+            "AssocGrpGRES",
+            "AssocGrpGRESMinutes",
+            "PartitionNodeLimit",
+            "PartitionTimeLimit",
+            "ReqNodeNotAvail",
+            "BeginTime",
+            "JobHeldUser",
+            "JobHeldAdmin",
+            "NodeDown",
+            "BadConstraints",
+            "launch_failed_requeued_held",
+            "None",
+            "",
+        ] {
+            assert!(
+                explain_reason(code).is_some(),
+                "no explanation for {:?}",
+                code
+            );
+        }
+        assert_eq!(
+            explain_reason("Priority"),
+            Some("waiting: higher-priority jobs are ahead in the queue")
+        );
+    }
+
+    #[test]
+    fn test_explain_reason_unknown_code_is_none() {
+        assert_eq!(explain_reason("SomeNewSlurmReason"), None);
+        assert_eq!(explain_reason("priority"), None); // case-sensitive
+    }
+
+    #[test]
+    fn test_job_stats_has_any() {
+        assert!(!JobStats::default().has_any());
+        assert!(JobStats {
+            cpu_efficiency: Some(0.5),
+            ..JobStats::default()
+        }
+        .has_any());
+        assert!(JobStats {
+            elapsed_frac_of_limit: Some(0.1),
+            ..JobStats::default()
+        }
+        .has_any());
     }
 
     #[test]

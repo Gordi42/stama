@@ -8,7 +8,7 @@ use ratatui::{
 use tui_textarea::{CursorMove, TextArea};
 
 use crate::app::Action;
-use crate::job::{Job, JobStatus};
+use crate::job::{explain_reason, reason_code, Job, JobStatus};
 use crate::joblist::{JobList, JobListAction, SortCategory};
 use crate::menus::help::HelpContext;
 use crate::menus::OpenMenu;
@@ -413,7 +413,18 @@ impl JobOverview {
     }
 
     fn render_job_details(&self, f: &mut Frame, area: &Rect, jobs: &JobList) {
-        let paragraph = Paragraph::new(jobs.get_job_details())
+        // insight lines about the selected job (pending reason or
+        // seff-style efficiency stats) are shown above the scontrol text
+        let mut lines: Vec<Line> = Vec::new();
+        if let Some(job) = jobs.get_job() {
+            append_pending_reason_lines(&mut lines, job);
+            append_efficiency_lines(&mut lines, job);
+        }
+        for line in jobs.get_job_details().lines() {
+            lines.push(Line::from(line.to_string()));
+        }
+
+        let paragraph = Paragraph::new(Text::from(lines))
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true });
 
@@ -484,6 +495,115 @@ fn format_time(job: &Job) -> String {
             }
         }
         _ => "".to_string(),
+    }
+}
+
+// ====================================================================
+//  JOB-DETAILS INSIGHT LINES (pending reason, efficiency stats)
+// ====================================================================
+
+/// For a pending job, prepends a one-line explanation of why it is
+/// still waiting (from the squeue "Reason" field).
+fn append_pending_reason_lines(lines: &mut Vec<Line>, job: &Job) {
+    if job.status != JobStatus::Pending {
+        return;
+    }
+    let raw = job.reason.as_deref().unwrap_or("None");
+    let code = reason_code(raw);
+    let text = match explain_reason(code) {
+        // "None"/empty carry no information, so no code is shown
+        Some(explanation) if code.is_empty() || code == "None" => {
+            format!("⏳ Pending — {}", explanation)
+        }
+        Some(explanation) => format!("⏳ Pending — {}: {}", code, explanation),
+        // unknown codes: show the raw reason reported by squeue
+        None => format!("⏳ Pending — {}", raw),
+    };
+    lines.push(Line::from(Span::styled(
+        text,
+        Style::default().fg(Color::Yellow).bold(),
+    )));
+    lines.push(Line::default());
+}
+
+/// The width (in cells) of the efficiency bars.
+const EFFICIENCY_BAR_WIDTH: usize = 20;
+
+/// For a started job with fetched stats, prepends seff-style
+/// efficiency bars (CPU, memory, share of the time limit used).
+fn append_efficiency_lines(lines: &mut Vec<Line>, job: &Job) {
+    let stats = match &job.stats {
+        Some(stats) if stats.has_any() => stats,
+        // degrade gracefully: no stats, no extra lines
+        _ => return,
+    };
+    lines.push(Line::from(Span::styled(
+        "Efficiency  (CPU/Mem: red = underused · Time: red = near limit)",
+        Style::default().fg(Color::Gray),
+    )));
+    if let Some(cpu) = stats.cpu_efficiency {
+        lines.push(efficiency_line("CPU ", cpu, utilization_color(cpu)));
+    }
+    if let Some(mem) = stats.mem_efficiency {
+        lines.push(efficiency_line("Mem ", mem, utilization_color(mem)));
+    }
+    if let Some(time) = stats.elapsed_frac_of_limit {
+        lines.push(efficiency_line("Time", time, time_limit_color(time)));
+    }
+    lines.push(Line::default());
+}
+
+/// Builds one efficiency line, e.g. "CPU   85% ████████████████▌░░░".
+fn efficiency_line(label: &str, fraction: f64, color: Color) -> Line<'static> {
+    Line::from(vec![
+        Span::raw(format!("{} ", label)),
+        Span::styled(
+            format!(
+                "{:>4.0}% {}",
+                fraction * 100.0,
+                bar_string(fraction, EFFICIENCY_BAR_WIDTH)
+            ),
+            Style::default().fg(color),
+        ),
+    ])
+}
+
+/// Renders a fraction (clamped to 0..=1) as a bar of block characters
+/// with eighth-block resolution, padded to `width` cells.
+fn bar_string(fraction: f64, width: usize) -> String {
+    const PARTIAL_BLOCKS: [char; 8] = [' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
+    let clamped = fraction.clamp(0.0, 1.0);
+    let eighths = (clamped * (width * 8) as f64).round() as usize;
+    let mut bar = "█".repeat(eighths / 8);
+    if eighths % 8 > 0 {
+        bar.push(PARTIAL_BLOCKS[eighths % 8]);
+    }
+    let filled = bar.chars().count();
+    bar.push_str(&"░".repeat(width.saturating_sub(filled)));
+    bar
+}
+
+/// Color for CPU/memory utilization: *low* utilization is the warning
+/// (allocated resources sit idle).
+fn utilization_color(fraction: f64) -> Color {
+    if fraction < 0.3 {
+        Color::Red
+    } else if fraction < 0.6 {
+        Color::Yellow
+    } else {
+        Color::Green
+    }
+}
+
+/// Color for the used share of the time limit: *high* usage is the
+/// warning (the job is close to being killed by the limit).
+fn time_limit_color(fraction: f64) -> Color {
+    if fraction < 0.7 {
+        Color::Green
+    } else if fraction <= 0.9 {
+        Color::Yellow
+    } else {
+        Color::Red
     }
 }
 
@@ -731,9 +851,19 @@ mod tests {
     /// Render the job overview into a test terminal of the given size and
     /// return the resulting buffer content as a single string.
     fn render_to_string(width: u16, height: u16, jobs: &JobList) -> String {
+        render_overview(width, height, jobs, false)
+    }
+
+    /// Like [`render_to_string`], with an expanded job-details pane.
+    fn render_with_details(width: u16, height: u16, jobs: &JobList) -> String {
+        render_overview(width, height, jobs, true)
+    }
+
+    fn render_overview(width: u16, height: u16, jobs: &JobList, expand_details: bool) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut overview = JobOverview::new(250, "squeue -u user");
+        overview.collapsed_bot = !expand_details;
         terminal
             .draw(|f| {
                 let area = f.area();
@@ -781,5 +911,107 @@ mod tests {
         let content = render_to_string(80, 20, &jobs);
         assert!(content.contains("SLURM TASK MANAGER"));
         assert!(content.contains("No jobs found"));
+    }
+
+    // ----------------------------------------------------------------
+    // details pane: pending reason and efficiency stats
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn test_render_pending_job_shows_reason_explanation() {
+        let mut job = make_running_job();
+        job.status = JobStatus::Pending;
+        job.reason = Some("Priority".to_string());
+        let mut jobs = JobList::new();
+        jobs.jobs.push(job);
+        jobs.set_index(0).unwrap();
+
+        let content = render_with_details(100, 24, &jobs);
+        assert!(content.contains("Pending — Priority:"));
+        assert!(content.contains("higher-priority jobs are ahead in the queue"));
+    }
+
+    #[test]
+    fn test_render_pending_job_with_unknown_reason_shows_raw_code() {
+        let mut job = make_running_job();
+        job.status = JobStatus::Pending;
+        job.reason = Some("SomeNewSlurmReason".to_string());
+        let mut jobs = JobList::new();
+        jobs.jobs.push(job);
+        jobs.set_index(0).unwrap();
+
+        let content = render_with_details(100, 24, &jobs);
+        assert!(content.contains("Pending — SomeNewSlurmReason"));
+    }
+
+    #[test]
+    fn test_render_running_job_with_stats_shows_gauges() {
+        let mut job = make_running_job();
+        job.stats = Some(Box::new(crate::job::JobStats {
+            cpu_efficiency: Some(0.85),
+            mem_efficiency: Some(0.42),
+            elapsed_frac_of_limit: Some(0.61),
+        }));
+        let mut jobs = JobList::new();
+        jobs.jobs.push(job);
+        jobs.set_index(0).unwrap();
+
+        let content = render_with_details(100, 24, &jobs);
+        assert!(content.contains("Efficiency"));
+        assert!(content.contains("CPU"));
+        assert!(content.contains("85%"));
+        assert!(content.contains("Mem"));
+        assert!(content.contains("42%"));
+        assert!(content.contains("Time"));
+        assert!(content.contains("61%"));
+        // the bars are drawn with block characters
+        assert!(content.contains("████"));
+    }
+
+    #[test]
+    fn test_render_running_job_without_stats_shows_no_gauges() {
+        let mut jobs = JobList::new();
+        jobs.jobs.push(make_running_job());
+        jobs.set_index(0).unwrap();
+
+        let content = render_with_details(100, 24, &jobs);
+        // no stats fetched: the efficiency block is omitted entirely
+        assert!(!content.contains("Efficiency"));
+        // a running job never shows the pending line
+        assert!(!content.contains("Pending —"));
+    }
+
+    // ----------------------------------------------------------------
+    // bar rendering helpers
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn test_bar_string_widths_and_clamping() {
+        // empty and full bars are exactly `width` cells
+        assert_eq!(bar_string(0.0, 4), "░░░░");
+        assert_eq!(bar_string(1.0, 4), "████");
+        // values beyond the range are clamped
+        assert_eq!(bar_string(-0.5, 4), "░░░░");
+        assert_eq!(bar_string(2.5, 4), "████");
+        // a half-filled bar uses the half block
+        assert_eq!(bar_string(0.5, 4), "██░░");
+        assert_eq!(bar_string(0.625, 4), "██▌░");
+        // every bar is padded to the requested width
+        for i in 0..=10 {
+            let bar = bar_string(i as f64 / 10.0, 7);
+            assert_eq!(bar.chars().count(), 7, "wrong width for {}", i);
+        }
+    }
+
+    #[test]
+    fn test_efficiency_colors() {
+        // CPU/memory: low utilization is the warning
+        assert_eq!(utilization_color(0.1), Color::Red);
+        assert_eq!(utilization_color(0.45), Color::Yellow);
+        assert_eq!(utilization_color(0.9), Color::Green);
+        // time limit: high usage is the warning
+        assert_eq!(time_limit_color(0.5), Color::Green);
+        assert_eq!(time_limit_color(0.8), Color::Yellow);
+        assert_eq!(time_limit_color(0.95), Color::Red);
     }
 }
