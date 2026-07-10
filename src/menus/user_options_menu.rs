@@ -51,6 +51,14 @@ impl UserOptionsMenu {
             ),
             TextField::new("External editor", TextFieldType::Text(list.external_editor)),
             TextField::new("Job columns", TextFieldType::Columns(list.job_columns)),
+            TextField::new(
+                "Notification bell on job start/finish",
+                TextFieldType::Boolean(list.notify_bell),
+            ),
+            TextField::new(
+                "Desktop notification on job start/finish",
+                TextFieldType::Boolean(list.notify_desktop),
+            ),
         ];
 
         Self {
@@ -108,6 +116,14 @@ impl UserOptionsMenu {
             job_columns: match &self.entries[5].field_type {
                 TextFieldType::Columns(columns) => columns.clone(),
                 _ => JobColumn::defaults(),
+            },
+            notify_bell: match &self.entries[6].field_type {
+                TextFieldType::Boolean(b) => *b,
+                _ => false,
+            },
+            notify_desktop: match &self.entries[7].field_type {
+                TextFieldType::Boolean(b) => *b,
+                _ => false,
             },
         }
     }

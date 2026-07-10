@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::columns::JobColumn;
 use crate::job::Job;
+use crate::notify::{detect_transitions, JobTransition};
 use crate::scheduler::{Scheduler, SlurmScheduler};
 use crate::update_content::{ContentTick, ContentUpdater, TIMEOUT_ERROR};
 use crate::user_options::UserOptions;
@@ -31,6 +32,15 @@ pub enum UpdateStatus {
     /// New content was applied (or the worker timed out) and there is
     /// an error to surface to the user.
     Error(String),
+}
+
+/// The full outcome of a [`JobList::update_jobs`] tick: the status the
+/// app uses for error popups plus the job status transitions observed
+/// between the old and the new job list (used for notifications).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateOutcome {
+    pub status: UpdateStatus,
+    pub transitions: Vec<JobTransition>,
 }
 
 /// A struct that contains all the informations about running jobs.
@@ -277,11 +287,14 @@ impl JobList {
 impl JobList {
     /// Updates the job list.
     /// Returns whether new content arrived and, if so, whether an error
-    /// has to be surfaced to the user (see [`UpdateStatus`]).
-    pub fn update_jobs(&mut self, user_options: &UserOptions) -> UpdateStatus {
+    /// has to be surfaced to the user (see [`UpdateStatus`]), plus the
+    /// job status transitions observed against the previous job list
+    /// (see [`UpdateOutcome`]).
+    pub fn update_jobs(&mut self, user_options: &UserOptions) -> UpdateOutcome {
         // get the currently selected job to keep it selected after update
         let job: Option<Job> = self.get_job().cloned();
         let command = self.squeue_command.clone();
+        let mut transitions = Vec::new();
         // check if the content updater returns a new job list
         let status = match self
             .content_updater
@@ -289,6 +302,9 @@ impl JobList {
         {
             ContentTick::New(content) => {
                 let content = *content;
+                // diff the old job list against the fresh one before
+                // replacing it, so job status changes can be notified
+                transitions = detect_transitions(&self.jobs, &content.job_list);
                 self.jobs = content.job_list;
                 self.job_details = content.details_text;
                 self.log_tail = content.log_text;
@@ -306,7 +322,10 @@ impl JobList {
         if let Some(job) = job {
             self.reselect_job(job.id);
         }
-        status
+        UpdateOutcome {
+            status,
+            transitions,
+        }
     }
 
     /// Re-selects the job with the given id after the job list changed.

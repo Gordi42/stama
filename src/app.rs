@@ -17,6 +17,7 @@ use crate::menus::{
     OpenMenu,
 };
 use crate::mouse_input::MouseInput;
+use crate::notify;
 use crate::scheduler::{Scheduler, SlurmScheduler};
 use crate::user_options::UserOptions;
 
@@ -497,9 +498,11 @@ impl App {
 impl App {
     /// Updates the joblist. Errors from the background update (e.g. a
     /// failing squeue command or a hung worker) are surfaced in the
-    /// error popup.
+    /// error popup, and job status transitions are notified to the
+    /// user if enabled in the user options.
     pub fn update_jobs(&mut self) {
-        match self.joblist.update_jobs(&self.user_options) {
+        let outcome = self.joblist.update_jobs(&self.user_options);
+        match outcome.status {
             // nothing new this tick; leave the popup state alone
             UpdateStatus::Pending => {}
             // a successful update clears the error memory so that a
@@ -516,6 +519,17 @@ impl App {
                     self.last_update_error = Some(error);
                 }
             }
+        }
+        // notify the user about job state changes (terminal bell and/or
+        // OSC 777 desktop notification, per the user options); written
+        // to stderr, the same stream the TUI renders to (see main.rs).
+        // notification failures must never break the update loop
+        if !outcome.transitions.is_empty() {
+            let _ = notify::notify(
+                &mut std::io::stderr(),
+                &outcome.transitions,
+                &self.user_options,
+            );
         }
     }
 

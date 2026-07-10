@@ -21,6 +21,12 @@ pub struct UserOptions {
     // The columns of the job table, e.g.
     // job_columns = ["id", "name", "status", "time", "partition", "priority"]
     pub job_columns: Vec<JobColumn>,
+    // Ring the terminal bell when a job starts or finishes
+    pub notify_bell: bool,
+    // Send a desktop notification (OSC 777 escape sequence) when a job
+    // starts or finishes; needs a supporting terminal (kitty, foot,
+    // WezTerm, Ghostty), other terminals ignore it
+    pub notify_desktop: bool,
 }
 
 impl Default for UserOptions {
@@ -32,6 +38,8 @@ impl Default for UserOptions {
             confirm_before_kill: true,
             external_editor: "vim".to_string(),
             job_columns: JobColumn::defaults(),
+            notify_bell: false,
+            notify_desktop: false,
         }
     }
 }
@@ -142,6 +150,8 @@ mod tests {
                 JobColumn::Priority,
                 JobColumn::Qos,
             ],
+            notify_bell: true,
+            notify_desktop: true,
         }
     }
 
@@ -191,6 +201,9 @@ mod tests {
         assert_eq!(loaded.confirm_before_quit, defaults.confirm_before_quit);
         assert_eq!(loaded.confirm_before_kill, defaults.confirm_before_kill);
         assert_eq!(loaded.external_editor, defaults.external_editor);
+        // configs without the notification keys keep them disabled
+        assert!(!loaded.notify_bell);
+        assert!(!loaded.notify_desktop);
         // regression guard: a config without a `job_columns` key keeps
         // the historical six columns in the same order
         assert_eq!(loaded.job_columns, JobColumn::defaults());

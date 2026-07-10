@@ -135,6 +135,14 @@ impl HelpMenu {
                 "  available",
                 "id, name, status, time, partition, nodes, priority, reason, account, qos, cpus, nodelist",
             ),
+            HelpEntry::new(
+                "Notification bell",
+                "Ring the terminal bell when a job starts or finishes",
+            ),
+            HelpEntry::new(
+                "Desktop notification",
+                "Notify when a job starts or finishes (OSC 777; needs kitty, foot, WezTerm or Ghostty)",
+            ),
         ];
         let stama_settings = HelpCategory::new("Stama Settings", stama_settings_entries);
         // info category

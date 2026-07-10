@@ -85,6 +85,8 @@ job_columns = ["id", "name", "status", "time", "partition", "priority"]
 ```
 Available columns: `id`, `name`, `status`, `time`, `partition`, `nodes`, `priority`, `reason`, `account`, `qos`, `cpus`, `nodelist`. Clicking a column header (or pressing 'tab') sorts the job list by that column. If `job_columns` is missing from the config file, the default columns `id, name, status, time, partition, nodes` are used.
 
+Stama can also notify you when a job starts (pending → running) or finishes (running → completed/failed/timeout/cancelled): `notify_bell = true` rings the terminal bell (once per refresh, even if several jobs change at once), and `notify_desktop = true` sends a desktop notification via the OSC 777 escape sequence (supported by kitty, foot, WezTerm and Ghostty; harmlessly ignored by other terminals). Both options are off by default.
+
 **For more infos see:** [notes.md](notes.md)
 
 
