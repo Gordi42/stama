@@ -596,11 +596,11 @@ fn append_pending_reason_lines(lines: &mut Vec<Line>, job: &Job) {
     let text = match explain_reason(code) {
         // "None"/empty carry no information, so no code is shown
         Some(explanation) if code.is_empty() || code == "None" => {
-            format!("⏳ Pending — {}", explanation)
+            format!("Pending — {}", explanation)
         }
-        Some(explanation) => format!("⏳ Pending — {}: {}", code, explanation),
+        Some(explanation) => format!("Pending — {}: {}", code, explanation),
         // unknown codes: show the raw reason reported by squeue
-        None => format!("⏳ Pending — {}", raw),
+        None => format!("Pending — {}", raw),
     };
     lines.push(Line::from(Span::styled(
         text,
@@ -621,12 +621,9 @@ fn append_efficiency_lines(lines: &mut Vec<Line>, job: &Job) {
         _ => return,
     };
     lines.push(Line::from(Span::styled(
-        "Efficiency  (CPU/Mem: red = underused · Time: red = near limit)",
+        "Efficiency  (Mem: red = underused · Time: red = near limit)",
         Style::default().fg(Color::Gray),
     )));
-    if let Some(cpu) = stats.cpu_efficiency {
-        lines.push(efficiency_line("CPU ", cpu, utilization_color(cpu)));
-    }
     if let Some(mem) = stats.mem_efficiency {
         lines.push(efficiency_line("Mem ", mem, utilization_color(mem)));
     }
@@ -1347,7 +1344,6 @@ mod tests {
     fn test_render_running_job_with_stats_shows_gauges() {
         let mut job = make_running_job();
         job.stats = Some(Box::new(crate::job::JobStats {
-            cpu_efficiency: Some(0.85),
             mem_efficiency: Some(0.42),
             elapsed_frac_of_limit: Some(0.61),
         }));
@@ -1357,8 +1353,7 @@ mod tests {
 
         let content = render_with_details(100, 24, &jobs);
         assert!(content.contains("Efficiency"));
-        assert!(content.contains("CPU"));
-        assert!(content.contains("85%"));
+        assert!(!content.contains("CPU"));
         assert!(content.contains("Mem"));
         assert!(content.contains("42%"));
         assert!(content.contains("Time"));
@@ -1507,7 +1502,6 @@ mod tests {
     fn test_snapshot_running_job_with_stats() {
         let mut jobs = make_snapshot_joblist();
         jobs.jobs[0].stats = Some(Box::new(crate::job::JobStats {
-            cpu_efficiency: Some(0.85),
             mem_efficiency: Some(0.42),
             elapsed_frac_of_limit: Some(0.61),
         }));

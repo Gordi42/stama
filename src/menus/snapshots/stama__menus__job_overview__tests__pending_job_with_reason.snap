@@ -1,6 +1,6 @@
 ---
 source: src/menus/job_overview.rs
-assertion_line: 1229
+assertion_line: 1498
 expression: terminal.backend()
 ---
 "                                         SLURM TASK MANAGER                                         "
@@ -12,7 +12,7 @@ expression: terminal.backend()
 "│                                                                                                  │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 "╭▼ 1. Job details  2. Log──────────────────────────────────────────────────────────────────────────╮"
-"│⏳ Pending — Priority: waiting: higher-priority jobs are ahead in the queue                       │" Hidden by multi-width symbols: [(2, " ")]
+"│Pending — Priority: waiting: higher-priority jobs are ahead in the queue                          │"
 "│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"

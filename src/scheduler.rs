@@ -806,19 +806,12 @@ pub fn parse_job_stats(output: &str, job_id: &str) -> Option<JobStats> {
     }
     let main_row = main_row?;
 
-    let total_cpu = parse_slurm_duration(&main_row[2]);
     let elapsed = parse_slurm_duration(&main_row[3]);
     let alloc_cpus = main_row[4].parse::<u32>().ok();
     let nodes = main_row[8].parse::<u32>().unwrap_or(0);
     let req_mem = parse_req_mem(&main_row[6], nodes, alloc_cpus.unwrap_or(0));
     let time_limit = parse_slurm_duration(&main_row[7]);
 
-    let cpu_efficiency = match (total_cpu, elapsed, alloc_cpus) {
-        (Some(used), Some(elapsed), Some(cpus)) if elapsed > 0.0 && cpus > 0 => {
-            Some(used / (elapsed * cpus as f64))
-        }
-        _ => None,
-    };
     let mem_efficiency = match (max_rss, req_mem) {
         (Some(rss), Some(requested)) if requested > 0.0 => Some(rss / requested),
         _ => None,
@@ -829,7 +822,6 @@ pub fn parse_job_stats(output: &str, job_id: &str) -> Option<JobStats> {
     };
 
     Some(JobStats {
-        cpu_efficiency,
         mem_efficiency,
         elapsed_frac_of_limit,
     })
@@ -1262,7 +1254,6 @@ mod tests {
 1001.extern|COMPLETED|00:00:00|01:00:00|4|1024K|8Gn|02:00:00|1
 ";
         let stats = parse_job_stats(output, "1001").unwrap();
-        assert!((stats.cpu_efficiency.unwrap() - 0.5).abs() < 1e-9);
         assert!((stats.mem_efficiency.unwrap() - 0.25).abs() < 1e-9);
         assert!((stats.elapsed_frac_of_limit.unwrap() - 0.5).abs() < 1e-9);
     }
@@ -1276,7 +1267,6 @@ mod tests {
 2002.batch|RUNNING|30:00.500|01:00:00|2|1048576K|1Gc|04:00:00|1
 ";
         let stats = parse_job_stats(output, "2002").unwrap();
-        assert!((stats.cpu_efficiency.unwrap() - 1800.5 / 7200.0).abs() < 1e-9);
         assert!((stats.mem_efficiency.unwrap() - 0.5).abs() < 1e-9);
         assert!((stats.elapsed_frac_of_limit.unwrap() - 0.25).abs() < 1e-9);
     }
@@ -1286,8 +1276,6 @@ mod tests {
         // a pending job: zero elapsed time, no steps, no MaxRSS
         let output = "3003|PENDING|00:00:00|00:00:00|0||4000Mn|01:00:00|0\n";
         let stats = parse_job_stats(output, "3003").unwrap();
-        // zero elapsed/CPUs must not divide by zero
-        assert_eq!(stats.cpu_efficiency, None);
         // no MaxRSS row and 0 nodes * 4000M = 0 requested
         assert_eq!(stats.mem_efficiency, None);
         // 0 s elapsed of a 1 h limit is a valid 0 %
@@ -1301,7 +1289,6 @@ mod tests {
 4004.batch|RUNNING|01:00:00|01:00:00|1|1G|4G|UNLIMITED|1
 ";
         let stats = parse_job_stats(output, "4004").unwrap();
-        assert!((stats.cpu_efficiency.unwrap() - 1.0).abs() < 1e-9);
         assert!((stats.mem_efficiency.unwrap() - 0.25).abs() < 1e-9);
         assert_eq!(stats.elapsed_frac_of_limit, None);
     }

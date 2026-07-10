@@ -1,6 +1,6 @@
 ---
 source: src/menus/job_overview.rs
-assertion_line: 1242
+assertion_line: 1510
 expression: terminal.backend()
 ---
 "                                         SLURM TASK MANAGER                                         "
@@ -12,10 +12,10 @@ expression: terminal.backend()
 "│                                                                                                  │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 "╭▼ 1. Job details  2. Log──────────────────────────────────────────────────────────────────────────╮"
-"│Efficiency  (CPU/Mem: red = underused · Time: red = near limit)                                   │"
-"│CPU    85% █████████████████░░░                                                                   │"
+"│Efficiency  (Mem: red = underused · Time: red = near limit)                                       │"
 "│Mem    42% ████████▍░░░░░░░░░░░                                                                   │"
 "│Time   61% ████████████▎░░░░░░░                                                                   │"
+"│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"

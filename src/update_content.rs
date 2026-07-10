@@ -436,7 +436,6 @@ mod tests {
     fn stats_of_selected_job_are_attached_to_its_job_list_entry() {
         use crate::job::JobStats;
         let stats = JobStats {
-            cpu_efficiency: Some(0.85),
             mem_efficiency: Some(0.42),
             elapsed_frac_of_limit: Some(0.61),
         };
@@ -465,7 +464,6 @@ mod tests {
         let fake = Arc::new(FakeScheduler {
             squeue_response: Ok(vec![job("1", JobStatus::Pending)]),
             stats_response: Ok(Some(JobStats {
-                cpu_efficiency: Some(1.0),
                 ..JobStats::default()
             })),
             ..FakeScheduler::default()

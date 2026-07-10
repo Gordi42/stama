@@ -64,9 +64,6 @@ impl std::fmt::Display for JobStatus {
 /// that have not started yet).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct JobStats {
-    /// TotalCPU / (Elapsed * AllocCPUS): the fraction of the allocated
-    /// CPU time that was actually used (1.0 = 100 %).
-    pub cpu_efficiency: Option<f64>,
     /// MaxRSS / total requested memory (1.0 = 100 %).
     pub mem_efficiency: Option<f64>,
     /// Elapsed / Timelimit: how much of the time limit is used up.
@@ -76,9 +73,7 @@ pub struct JobStats {
 impl JobStats {
     /// Whether at least one component is available for display.
     pub fn has_any(&self) -> bool {
-        self.cpu_efficiency.is_some()
-            || self.mem_efficiency.is_some()
-            || self.elapsed_frac_of_limit.is_some()
+        self.mem_efficiency.is_some() || self.elapsed_frac_of_limit.is_some()
     }
 }
 
@@ -488,7 +483,7 @@ mod tests {
     fn test_job_stats_has_any() {
         assert!(!JobStats::default().has_any());
         assert!(JobStats {
-            cpu_efficiency: Some(0.5),
+            mem_efficiency: Some(0.5),
             ..JobStats::default()
         }
         .has_any());
