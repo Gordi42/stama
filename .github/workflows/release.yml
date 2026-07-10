@@ -18,11 +18,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: taiki-e/create-gh-release-action@v1
         with:
+          # Release body is taken from the matching section of CHANGELOG.md.
+          changelog: CHANGELOG.md
           token: ${{ secrets.GITHUB_TOKEN }}
 
   upload-assets:
     needs: create-release
     strategy:
+      # Build every target even if one fails: a broken aarch64 build must
+      # not cancel the x86_64 binaries most users need.
+      fail-fast: false
       matrix:
         include:
           # We build on ubuntu-22.04 (not -latest) on purpose: the resulting
@@ -42,6 +47,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # aarch64-unknown-linux-musl does not default to rust's self-contained
+      # linking (unlike x86_64), so musl targets need the musl C toolchain.
+      - name: Install musl toolchain
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update -y && sudo apt-get install -y musl-tools
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: stama

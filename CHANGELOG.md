@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.1] - 2026-07-10
+
+### Fixed
+- Release pipeline: static musl binaries build again (aarch64 musl toolchain), one failing target no longer cancels the others, and the release description is generated from this changelog
+- Removed the CPU efficiency gauge (sacct's TotalCPU is only populated for finished steps on many clusters, so it always showed 0% for running jobs) and the emoji on the pending-reason line
+
 ## [1.1.0] - 2026-07-10
 
 A full overhaul: stability, testing, CI/CD, and new features.
