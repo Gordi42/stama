@@ -87,6 +87,8 @@ Available columns: `id`, `name`, `status`, `time`, `partition`, `nodes`, `priori
 
 Stama can also notify you when a job starts (pending → running) or finishes (running → completed/failed/timeout/cancelled): `notify_bell = true` rings the terminal bell (once per refresh, even if several jobs change at once), and `notify_desktop = true` sends a desktop notification via the OSC 777 escape sequence (supported by kitty, foot, WezTerm and Ghostty; harmlessly ignored by other terminals). Both options are off by default.
 
+Tasks of the same job array (e.g. `12345_1`, `12345_2`, ..., or the pending placeholder `12345_[8-99]`) are collapsed into a single expandable row `12345[]` that shows aggregate status counts (e.g. `3R 10PD 37CD`). Press Space (or click the selected group row) to expand or collapse the tasks. "Kill job" on a group row cancels the whole array (`scancel <base id>`); the other actions apply to the group's first task. Set `group_job_arrays = false` to disable the grouping (on by default).
+
 **For more infos see:** [notes.md](notes.md)
 
 

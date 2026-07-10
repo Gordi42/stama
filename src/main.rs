@@ -12,6 +12,7 @@ pub mod app;
 pub mod columns;
 pub mod event;
 pub mod job;
+pub mod job_rows;
 pub mod joblist;
 pub mod menus;
 pub mod mouse_input;

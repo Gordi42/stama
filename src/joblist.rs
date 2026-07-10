@@ -1,9 +1,11 @@
 use color_eyre::{eyre::eyre, Result};
+use std::collections::HashSet;
 use std::process::Command;
 use std::sync::Arc;
 
 use crate::columns::JobColumn;
-use crate::job::Job;
+use crate::job::{array_base_id, Job};
+use crate::job_rows::{build_rows, JobRow};
 use crate::notify::{detect_transitions, JobTransition};
 use crate::scheduler::{Scheduler, SlurmScheduler};
 use crate::update_content::{ContentTick, ContentUpdater, TIMEOUT_ERROR};
@@ -19,6 +21,18 @@ pub enum JobListAction {
     NextSortCategory,
     ReverseSortDirection,
     UpdateSqueueCommand(String),
+    /// Expands/collapses the selected job-array group row.
+    ToggleGroup,
+}
+
+/// A stable reference to a display row, used to restore the selection
+/// after the row layout changed (refresh, sort, expand/collapse).
+#[derive(Debug, Clone, PartialEq)]
+pub enum RowKey {
+    /// A single job or an expanded array task, identified by its id.
+    Job(String),
+    /// An array-group header row, identified by its base id.
+    Group(String),
 }
 
 /// The outcome of a [`JobList::update_jobs`] tick, used by the app to
@@ -63,6 +77,12 @@ pub struct JobList {
     content_updater: ContentUpdater,
     // The squeue command to get the job list.
     pub squeue_command: String,
+    // Whether tasks of the same job array are collapsed into a single
+    // expandable group row (mirrors `UserOptions::group_job_arrays`).
+    group_job_arrays: bool,
+    // The base ids of the currently expanded array groups. Kept across
+    // refreshes so a group stays expanded when new content arrives.
+    expanded_groups: HashSet<String>,
 }
 
 // ====================================================================
@@ -92,6 +112,8 @@ impl JobList {
                 // instead of filtering by a bogus user name
                 None => "squeue".to_string(),
             },
+            group_job_arrays: true,
+            expanded_groups: HashSet::new(),
         }
     }
 }
@@ -132,9 +154,53 @@ fn get_user() -> Option<String> {
 // ====================================================================
 
 impl JobList {
-    /// Returns the selected job.
+    /// Returns the display rows of the job table: single jobs,
+    /// job-array group headers and (for expanded groups) task rows.
+    /// The rows are recomputed from the flat job list on every call,
+    /// so they can never go stale.
+    pub fn rows(&self) -> Vec<JobRow> {
+        build_rows(&self.jobs, self.group_job_arrays, &self.expanded_groups)
+    }
+
+    /// Returns the selected job. For a selected array-group header row
+    /// this is the group's first task (the group's representative for
+    /// the details/log panes and for per-job actions).
     pub fn get_job(&self) -> Option<&Job> {
-        self.jobs.get(self.selected)
+        match self.rows().get(self.selected)? {
+            JobRow::Single { job_index } | JobRow::Task { job_index, .. } => {
+                self.jobs.get(*job_index)
+            }
+            JobRow::Group { task_indices, .. } => {
+                task_indices.first().and_then(|&index| self.jobs.get(index))
+            }
+        }
+    }
+
+    /// If the selected row is an array-group header, returns the base
+    /// id, the number of tasks and the first task; `None` otherwise.
+    pub fn selected_group(&self) -> Option<(String, usize, &Job)> {
+        match self.rows().get(self.selected)? {
+            JobRow::Group {
+                base_id,
+                task_indices,
+                ..
+            } => {
+                let first = self.jobs.get(*task_indices.first()?)?;
+                Some((base_id.clone(), task_indices.len(), first))
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns a stable key for the selected row (used to restore the
+    /// selection after the rows changed), or `None` if no row exists.
+    pub fn selected_row_key(&self) -> Option<RowKey> {
+        match self.rows().get(self.selected)? {
+            JobRow::Single { job_index } | JobRow::Task { job_index, .. } => {
+                Some(RowKey::Job(self.jobs.get(*job_index)?.id.clone()))
+            }
+            JobRow::Group { base_id, .. } => Some(RowKey::Group(base_id.clone())),
+        }
     }
 
     /// Returns the details of the selected job.
@@ -163,9 +229,10 @@ impl JobList {
         self.reverse
     }
 
-    /// Returns the length of the job list.
+    /// Returns the number of visible display rows (collapsed array
+    /// groups count as one row, expanded ones as header + tasks).
     pub fn len(&self) -> usize {
-        self.jobs.len()
+        self.rows().len()
     }
 
     /// Returns whether the job list is empty.
@@ -192,8 +259,8 @@ impl JobList {
             return Ok(());
         }
         // now handle the case of a non-empty job list
-        // check if the index is out of bounds
-        if index >= self.jobs.len() {
+        // check if the index is out of bounds (of the visible rows)
+        if index >= self.len() {
             return Err(eyre!("Index out of bounds"));
         }
         self.selected = index;
@@ -207,19 +274,46 @@ impl JobList {
         self.log_tail = "loading...".to_string();
     }
 
-    /// Selects the job with the given id.
-    /// Returns an error if the job with the given id does not exist.
+    /// Selects the row showing the job with the given id: the job's
+    /// own row if it is visible (a single job or an expanded task), or
+    /// the group header of the collapsed array group containing it.
+    /// Returns an error if no row shows the job.
     pub fn select_job_by_id(&mut self, id: String) -> Result<()> {
-        // find the index of the job with the given id
-        let index = self.jobs.iter().position(|job| job.id == id);
+        let index = self.rows().iter().position(|row| match row {
+            JobRow::Single { job_index } | JobRow::Task { job_index, .. } => {
+                self.jobs[*job_index].id == id
+            }
+            // a collapsed group represents all of its tasks; when it is
+            // expanded the task's own row matches instead
+            JobRow::Group {
+                task_indices,
+                expanded,
+                ..
+            } => !expanded && task_indices.iter().any(|&i| self.jobs[i].id == id),
+        });
         match index {
-            // if the job with the given id exists, set the index
             Some(index) => {
                 self.set_index(index)?;
                 Ok(())
             }
-            // Otherwise, return an error
             None => Err(eyre!("Job with id {} not found", id)),
+        }
+    }
+
+    /// Selects the row identified by the given key. Returns an error
+    /// if no matching row exists anymore.
+    pub fn select_row_by_key(&mut self, key: &RowKey) -> Result<()> {
+        match key {
+            RowKey::Job(id) => self.select_job_by_id(id.clone()),
+            RowKey::Group(base) => {
+                let index = self.rows().iter().position(
+                    |row| matches!(row, JobRow::Group { base_id, .. } if base_id == base),
+                );
+                match index {
+                    Some(index) => self.set_index(index),
+                    None => Err(eyre!("Job array group {} not found", base)),
+                }
+            }
         }
     }
 
@@ -234,9 +328,18 @@ impl JobList {
             JobListAction::Select(index) => {
                 // check if the index is out of bounds
                 if index < self.len() {
-                    self.set_index(index).unwrap();
-                    self.set_loading_text();
+                    if index == self.selected {
+                        // clicking the already selected row toggles the
+                        // expansion if it is an array-group header
+                        self.toggle_selected_group();
+                    } else {
+                        self.set_index(index).unwrap();
+                        self.set_loading_text();
+                    }
                 }
+            }
+            JobListAction::ToggleGroup => {
+                self.toggle_selected_group();
             }
             JobListAction::NextSortCategory => {
                 self.set_sort_category(self.sort_category.next_in(columns));
@@ -269,6 +372,45 @@ impl JobList {
         self.set_index(0).unwrap();
     }
 
+    /// Expands/collapses the selected array-group row. On a group
+    /// header the expansion is toggled; on an expanded task row the
+    /// parent group is collapsed (and its header selected). Selecting
+    /// a plain job row is a no-op.
+    pub fn toggle_selected_group(&mut self) {
+        match self.rows().get(self.selected) {
+            Some(JobRow::Group { base_id, .. }) => {
+                let base = base_id.clone();
+                if !self.expanded_groups.remove(&base) {
+                    self.expanded_groups.insert(base);
+                }
+                // the header row keeps its index: expanding inserts the
+                // task rows *after* it, collapsing removes them again
+            }
+            Some(JobRow::Task { job_index, .. }) => {
+                if let Some(base) = array_base_id(&self.jobs[*job_index].id) {
+                    let base = base.to_string();
+                    self.expanded_groups.remove(&base);
+                    // select the group header the task collapsed into
+                    self.reselect_row(&RowKey::Group(base));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Enables/disables job-array grouping (mirrors the user option).
+    pub fn set_group_job_arrays(&mut self, group_job_arrays: bool) {
+        if self.group_job_arrays == group_job_arrays {
+            return;
+        }
+        self.group_job_arrays = group_job_arrays;
+        // the row layout changed; clamp the selection to the new rows
+        if self.selected >= self.len() {
+            // unwrap is safe: set_index(0) always succeeds
+            self.set_index(0).unwrap();
+        }
+    }
+
     /// Negates the reverse boolean.
     pub fn negate_reverse(&mut self) {
         self.reverse = !self.reverse;
@@ -291,8 +433,13 @@ impl JobList {
     /// job status transitions observed against the previous job list
     /// (see [`UpdateOutcome`]).
     pub fn update_jobs(&mut self, user_options: &UserOptions) -> UpdateOutcome {
-        // get the currently selected job to keep it selected after update
+        // keep the grouping flag in sync with the user options
+        self.set_group_job_arrays(user_options.group_job_arrays);
+        // get the currently selected job (the group representative for
+        // a selected group header) for the details/log fetch, and the
+        // row key to keep the same row selected after the update
         let job: Option<Job> = self.get_job().cloned();
+        let selected_key = self.selected_row_key();
         let command = self.squeue_command.clone();
         let mut transitions = Vec::new();
         // check if the content updater returns a new job list
@@ -318,9 +465,9 @@ impl JobList {
         };
         // sort the job list
         self.sort_raw();
-        // try to select the job that was selected before the update
-        if let Some(job) = job {
-            self.reselect_job(job.id);
+        // try to select the row that was selected before the update
+        if let Some(key) = selected_key {
+            self.reselect_row(&key);
         }
         UpdateOutcome {
             status,
@@ -338,6 +485,21 @@ impl JobList {
         if self.select_job_by_id(id).is_err() {
             // unwrap is safe: set_index(0) always succeeds
             self.set_index(0).unwrap();
+        }
+    }
+
+    /// Re-selects the row with the given key after the rows changed
+    /// (refresh, sort or expand/collapse), resetting to the first row
+    /// if no matching row exists anymore (see [`Self::reselect_job`]).
+    fn reselect_row(&mut self, key: &RowKey) {
+        match key {
+            RowKey::Job(id) => self.reselect_job(id.clone()),
+            RowKey::Group(_) => {
+                if self.select_row_by_key(key).is_err() {
+                    // unwrap is safe: set_index(0) always succeeds
+                    self.set_index(0).unwrap();
+                }
+            }
         }
     }
 
@@ -472,22 +634,18 @@ impl JobList {
     }
 
     /// Sorts the job list.
-    /// Update the selected job index such that the selected job
-    /// remains the same.
+    /// Update the selected row index such that the selected row
+    /// (job or array group) remains the same.
     pub fn sort(&mut self) {
         // only sort if there are jobs
         if self.jobs.is_empty() {
             return;
         }
-        // get the id of the job in focus
-        if let Some(job) = self.get_job() {
-            let id = job.id.clone();
-            self.sort_raw();
-            // unwrap is safe here because the job in focus is
-            // guaranteed to exist
-            self.select_job_by_id(id).unwrap();
-        } else {
-            self.sort_raw();
+        // get the key of the row in focus
+        let key = self.selected_row_key();
+        self.sort_raw();
+        if let Some(key) = key {
+            self.reselect_row(&key);
         }
     }
 }
@@ -864,6 +1022,196 @@ mod tests {
         // if the job still exists, it stays selected
         job_list.reselect_job("3".to_string());
         assert_eq!(job_list.get_job().unwrap().id, "3");
+    }
+
+    // ----------------------------------------------------------------
+    // job-array grouping (display rows)
+    // ----------------------------------------------------------------
+
+    /// Creates a JobList with one array (two tasks) and one single job.
+    fn create_array_job_list() -> JobList {
+        let mut job_list = JobList::new();
+        for id in ["100_1", "100_2", "300"] {
+            job_list
+                .jobs
+                .push(create_job(id, JobStatus::Running, "00:00:00", 1));
+        }
+        job_list
+    }
+
+    #[test]
+    fn test_navigation_over_collapsed_group_rows() {
+        let mut job_list = create_array_job_list();
+
+        // the two tasks collapse into one group row: 2 visible rows
+        assert_eq!(job_list.len(), 2);
+
+        // the group header (row 0) represents its first task
+        assert_eq!(job_list.get_job().unwrap().id, "100_1");
+        // j/k move over the visible rows, not the flat job list
+        job_list.next();
+        assert_eq!(job_list.get_job().unwrap().id, "300");
+        job_list.next(); // wraps around to the group header
+        assert_eq!(job_list.get_job().unwrap().id, "100_1");
+        job_list.previous();
+        assert_eq!(job_list.get_job().unwrap().id, "300");
+    }
+
+    #[test]
+    fn test_toggle_group_expands_and_collapses() {
+        let mut job_list = create_array_job_list();
+
+        // expand the group under the cursor (row 0)
+        job_list.toggle_selected_group();
+        assert_eq!(job_list.len(), 4); // header + 2 tasks + single
+        assert!(matches!(
+            job_list.rows()[0],
+            JobRow::Group { expanded: true, .. }
+        ));
+        // the header row stays selected
+        assert_eq!(job_list.get_index(), 0);
+
+        // navigation now visits the task rows
+        job_list.next();
+        assert_eq!(job_list.get_job().unwrap().id, "100_1");
+        job_list.next();
+        assert_eq!(job_list.get_job().unwrap().id, "100_2");
+
+        // toggling on a task row collapses the group and selects the
+        // group header
+        job_list.toggle_selected_group();
+        assert_eq!(job_list.len(), 2);
+        assert_eq!(job_list.get_index(), 0);
+        assert!(matches!(
+            job_list.rows()[0],
+            JobRow::Group {
+                expanded: false,
+                ..
+            }
+        ));
+
+        // toggling on a single job row is a no-op
+        job_list.next();
+        assert_eq!(job_list.get_job().unwrap().id, "300");
+        job_list.toggle_selected_group();
+        assert_eq!(job_list.len(), 2);
+        assert_eq!(job_list.get_job().unwrap().id, "300");
+    }
+
+    #[test]
+    fn test_select_reclick_toggles_group_row() {
+        let mut job_list = create_array_job_list();
+        let columns = JobColumn::defaults();
+
+        // selecting the already selected group row (e.g. a mouse click
+        // on it) expands the group
+        job_list.handle_joblist_action(JobListAction::Select(0), &columns);
+        assert_eq!(job_list.len(), 4);
+        // ... and a second re-click collapses it again
+        job_list.handle_joblist_action(JobListAction::Select(0), &columns);
+        assert_eq!(job_list.len(), 2);
+
+        // selecting a different row just moves the selection
+        job_list.handle_joblist_action(JobListAction::Select(1), &columns);
+        assert_eq!(job_list.get_job().unwrap().id, "300");
+        assert_eq!(job_list.len(), 2);
+
+        // the ToggleGroup action (Space) works on the selected row too
+        job_list.handle_joblist_action(JobListAction::Select(0), &columns);
+        job_list.handle_joblist_action(JobListAction::ToggleGroup, &columns);
+        assert_eq!(job_list.len(), 4);
+    }
+
+    #[test]
+    fn test_select_job_by_id_finds_collapsed_task_and_expanded_task() {
+        let mut job_list = create_array_job_list();
+
+        // collapsed: selecting a task id selects the group header
+        job_list.select_job_by_id("100_2".to_string()).unwrap();
+        assert_eq!(job_list.get_index(), 0);
+        assert!(job_list.selected_group().is_some());
+
+        // expanded: selecting a task id selects the task's own row
+        job_list.toggle_selected_group();
+        job_list.select_job_by_id("100_2".to_string()).unwrap();
+        assert_eq!(job_list.get_job().unwrap().id, "100_2");
+        assert!(job_list.selected_group().is_none());
+    }
+
+    #[test]
+    fn test_selected_group_reports_base_id_and_task_count() {
+        let mut job_list = create_array_job_list();
+
+        let (base_id, task_count, first) = job_list.selected_group().unwrap();
+        assert_eq!(base_id, "100");
+        assert_eq!(task_count, 2);
+        assert_eq!(first.id, "100_1");
+
+        // a single job row is not a group
+        job_list.next();
+        assert!(job_list.selected_group().is_none());
+    }
+
+    #[test]
+    fn test_expansion_and_selection_persist_across_refresh() {
+        let mut job_list = create_array_job_list();
+
+        // expand the group and select the task "100_2"
+        job_list.toggle_selected_group();
+        job_list.select_job_by_id("100_2".to_string()).unwrap();
+
+        // simulate a refresh tick: capture the selected row key, apply
+        // a fresh job list (with a new task 100_3), sort and reselect
+        // (the same steps update_jobs performs)
+        let key = job_list.selected_row_key().unwrap();
+        job_list.jobs = ["100_1", "100_2", "100_3", "300"]
+            .iter()
+            .map(|id| create_job(id, JobStatus::Running, "00:00:00", 1))
+            .collect();
+        job_list.sort_raw();
+        job_list.reselect_row(&key);
+
+        // the group is still expanded (header + 3 tasks + single)
+        assert_eq!(job_list.len(), 5);
+        // and the same task is selected again
+        assert_eq!(job_list.get_job().unwrap().id, "100_2");
+        assert!(job_list.selected_group().is_none());
+
+        // a selected group header is restored as well
+        job_list.toggle_selected_group(); // collapse, selects the header
+        let key = job_list.selected_row_key().unwrap();
+        assert_eq!(key, RowKey::Group("100".to_string()));
+        job_list.jobs = ["100_1", "100_2", "300"]
+            .iter()
+            .map(|id| create_job(id, JobStatus::Running, "00:00:00", 1))
+            .collect();
+        job_list.sort_raw();
+        job_list.reselect_row(&key);
+        assert!(job_list.selected_group().is_some());
+
+        // a vanished group resets the selection to the first row
+        job_list.jobs = vec![create_job("300", JobStatus::Running, "00:00:00", 1)];
+        job_list.reselect_row(&key);
+        assert_eq!(job_list.get_index(), 0);
+        assert_eq!(job_list.get_job().unwrap().id, "300");
+    }
+
+    #[test]
+    fn test_group_job_arrays_disabled_shows_flat_rows() {
+        let mut job_list = create_array_job_list();
+        assert_eq!(job_list.len(), 2);
+
+        job_list.set_group_job_arrays(false);
+        assert_eq!(job_list.len(), 3);
+        assert!(job_list
+            .rows()
+            .iter()
+            .all(|row| matches!(row, JobRow::Single { .. })));
+
+        // re-enabling clamps an out-of-bounds selection
+        job_list.set_index(2).unwrap();
+        job_list.set_group_job_arrays(true);
+        assert_eq!(job_list.get_index(), 0);
     }
 
     #[test]

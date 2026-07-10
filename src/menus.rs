@@ -223,8 +223,15 @@ impl MenuContainer {
     }
 
     /// Opens the job actions menu
-    /// This menu shows all the possible actions for the selected job
+    /// This menu shows all the possible actions for the selected job.
+    /// For a selected job-array group row, "Kill" targets the whole
+    /// array and the other actions apply to the group's first task.
     fn open_job_action(&mut self, joblist: &JobList) {
+        if let Some((base_id, task_count, job)) = joblist.selected_group() {
+            self.job_actions_menu
+                .activate_group(&base_id, task_count, job);
+            return;
+        }
         match joblist.get_job() {
             Some(job) => {
                 self.job_actions_menu.activate(job);
@@ -465,6 +472,72 @@ mod tests {
             other => panic!("expected Action::SshToNode, got {:?}", other),
         }
         assert!(!container.node_select_menu.is_open());
+    }
+
+    /// Opening the job actions menu on a job-array group row targets
+    /// the whole array: the kill action carries the base id and the
+    /// labels/title name the array and its task count.
+    #[test]
+    fn test_job_actions_on_group_row_target_the_array() {
+        use crate::job::{Job, JobStatus};
+        use crate::menus::job_actions::JobActions;
+
+        let mut container = container();
+        let mut joblist = JobList::new();
+        for id in ["100_1", "100_2"] {
+            joblist.jobs.push(Job::new(
+                id,
+                "array_job",
+                JobStatus::Running,
+                "00:00:00",
+                "main",
+                1,
+                "/work",
+                "cmd",
+                None,
+            ));
+        }
+        // row 0 is the collapsed group header
+        assert!(joblist.selected_group().is_some());
+
+        container.activate_menu(OpenMenu::JobActions, &joblist);
+
+        assert!(container.job_actions_menu.is_open());
+        assert_eq!(
+            container.job_actions_menu.job_name,
+            "job array 100 (2 tasks)"
+        );
+        assert_eq!(
+            container.job_actions_menu.labels[0],
+            "1. Kill job array (2 tasks)"
+        );
+        match &container.job_actions_menu.actions[0] {
+            JobActions::KillArray {
+                base_id,
+                task_count,
+            } => {
+                assert_eq!(base_id, "100");
+                assert_eq!(*task_count, 2);
+            }
+            other => panic!("expected KillArray, got {:?}", other),
+        }
+        // the other actions apply to the group's first task
+        match &container.job_actions_menu.actions[1] {
+            JobActions::OpenLog(job) => assert_eq!(job.id, "100_1"),
+            other => panic!("expected OpenLog, got {:?}", other),
+        }
+
+        // opening the menu for a plain job afterwards restores the
+        // standard labels and title
+        let mut joblist = JobList::new();
+        joblist.jobs.push(Job::new_default());
+        container.activate_menu(OpenMenu::JobActions, &joblist);
+        assert_eq!(container.job_actions_menu.labels[0], "1. Kill job");
+        assert_eq!(container.job_actions_menu.job_name, "jobname");
+        assert!(matches!(
+            container.job_actions_menu.actions[0],
+            JobActions::Kill(_)
+        ));
     }
 
     /// Confirming the dialog with 'y' emits the stored action

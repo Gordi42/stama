@@ -15,6 +15,15 @@ use crate::menus::{centered_popup, wrap_index, Menu, OpenMenu, PopupSize};
 pub enum JobActions {
     Kill(Job),
     KillConfirmed(Job),
+    /// Cancel every task of a job array at once (`scancel <base_id>`,
+    /// which Slurm applies to the whole array).
+    KillArray {
+        base_id: String,
+        task_count: usize,
+    },
+    KillArrayConfirmed {
+        base_id: String,
+    },
     OpenLog(Job),
     OpenSubmission(Job),
     GoWorkDir(Job),
@@ -51,6 +60,19 @@ impl JobActionsMenu {
             JobActions::GoWorkDir(job.clone()),
             JobActions::SSH(job.clone()),
         ];
+        Self {
+            open: false,
+            index: 0,
+            state: ListState::default(),
+            actions,
+            labels: Self::standard_labels(),
+            job_name: String::new(),
+            rect: Rect::default(),
+        }
+    }
+
+    /// The numbered labels of the per-job actions.
+    fn standard_labels() -> Vec<String> {
         let mut labels = vec![
             "Kill job".to_string(),
             "Open logfile".to_string(),
@@ -61,15 +83,7 @@ impl JobActionsMenu {
         for (i, label) in labels.iter_mut().enumerate() {
             *label = format!("{}. {}", i + 1, label);
         }
-        Self {
-            open: false,
-            index: 0,
-            state: ListState::default(),
-            actions,
-            labels,
-            job_name: String::new(),
-            rect: Rect::default(),
-        }
+        labels
     }
 }
 
@@ -86,6 +100,7 @@ impl JobActionsMenu {
             JobActions::GoWorkDir(job.clone()),
             JobActions::SSH(job.clone()),
         ];
+        self.labels = Self::standard_labels();
         self.job_name = job.get_jobname();
     }
 
@@ -113,6 +128,21 @@ impl JobActionsMenu {
 
     pub fn activate(&mut self, job: &Job) {
         self.set_job(job.clone());
+        self.open = true;
+        self.set_index(0);
+    }
+
+    /// Opens the menu for a collapsed/selected job-array group row.
+    /// "Kill" targets the whole array (`scancel <base_id>`); the other
+    /// actions apply to the group's first task.
+    pub fn activate_group(&mut self, base_id: &str, task_count: usize, job: &Job) {
+        self.set_job(job.clone());
+        self.actions[0] = JobActions::KillArray {
+            base_id: base_id.to_string(),
+            task_count,
+        };
+        self.labels[0] = format!("1. Kill job array ({} tasks)", task_count);
+        self.job_name = format!("job array {} ({} tasks)", base_id, task_count);
         self.open = true;
         self.set_index(0);
     }

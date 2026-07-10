@@ -14,6 +14,21 @@ pub enum JobStatus {
 }
 
 impl JobStatus {
+    /// The compact Slurm-style status code used in the aggregate
+    /// status cell of a job-array group row (e.g. "3R 10PD").
+    pub fn abbrev(&self) -> &'static str {
+        match self {
+            JobStatus::Unknown => "?",
+            JobStatus::Running => "R",
+            JobStatus::Pending => "PD",
+            JobStatus::Completing => "CG",
+            JobStatus::Completed => "CD",
+            JobStatus::Timeout => "TO",
+            JobStatus::Cancelled => "CA",
+            JobStatus::Failed => "F",
+        }
+    }
+
     pub fn priority(&self) -> usize {
         match self {
             JobStatus::Unknown => 0,
@@ -154,6 +169,68 @@ impl Job {
             stats: None,
         }
     }
+}
+
+// ====================================================================
+//  JOB-ARRAY IDS
+// ====================================================================
+
+/// The task part of a Slurm job-array id.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArrayTask {
+    /// A concrete task index, e.g. the "7" of "12345_7".
+    Id(u64),
+    /// The pending-range placeholder squeue shows for tasks that have
+    /// not started yet, e.g. the "[8-99]" of "12345_[8-99]" (with the
+    /// brackets included).
+    Range(String),
+}
+
+/// Parses a Slurm job-array id of the form `<base>_<task>`.
+///
+/// "12345_7" parses to `(12345, ArrayTask::Id(7))` and the pending
+/// placeholder "12345_[8-99]" to `(12345, ArrayTask::Range("[8-99]"))`.
+/// Returns `None` for ids that are not array-task ids (e.g. the plain
+/// "12345", or ids with a non-numeric base).
+pub fn parse_array_id(id: &str) -> Option<(u64, ArrayTask)> {
+    let (base, task) = id.split_once('_')?;
+    let base: u64 = base.parse().ok()?;
+    if let Ok(task_id) = task.parse::<u64>() {
+        return Some((base, ArrayTask::Id(task_id)));
+    }
+    if task.starts_with('[') && task.ends_with(']') {
+        return Some((base, ArrayTask::Range(task.to_string())));
+    }
+    None
+}
+
+/// The base job id of an array-task id ("12345_7" -> "12345"), or
+/// `None` if the id is not an array-task id.
+pub fn array_base_id(id: &str) -> Option<&str> {
+    parse_array_id(id)?;
+    id.split_once('_').map(|(base, _)| base)
+}
+
+/// The number of tasks a pending-range placeholder stands for, e.g.
+/// 92 for "[8-99]", 3 for "[1,3,5]" and 16 for "[0-15%4]" (the "%n"
+/// suffix only limits concurrency). Unparsable items count as one
+/// task, so the result is always at least 1.
+pub fn pending_range_count(range: &str) -> u64 {
+    let inner = range.trim_start_matches('[').trim_end_matches(']');
+    // a trailing "%<n>" limits how many tasks run at once; it does
+    // not change how many tasks the range contains
+    let inner = inner.split('%').next().unwrap_or(inner);
+    inner
+        .split(',')
+        .map(|item| match item.trim().split_once('-') {
+            Some((start, end)) => match (start.parse::<u64>(), end.parse::<u64>()) {
+                (Ok(start), Ok(end)) if end >= start => end - start + 1,
+                _ => 1,
+            },
+            None => 1,
+        })
+        .sum::<u64>()
+        .max(1)
 }
 
 // ====================================================================
@@ -420,6 +497,61 @@ mod tests {
             ..JobStats::default()
         }
         .has_any());
+    }
+
+    // ----------------------------------------------------------------
+    // job-array id parsing
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn test_parse_array_id_task() {
+        assert_eq!(parse_array_id("12345_7"), Some((12345, ArrayTask::Id(7))));
+        assert_eq!(array_base_id("12345_7"), Some("12345"));
+    }
+
+    #[test]
+    fn test_parse_array_id_pending_range() {
+        assert_eq!(
+            parse_array_id("12345_[8-99]"),
+            Some((12345, ArrayTask::Range("[8-99]".to_string())))
+        );
+        assert_eq!(array_base_id("12345_[8-99]"), Some("12345"));
+    }
+
+    #[test]
+    fn test_parse_array_id_non_array_ids() {
+        // a plain id is not an array-task id
+        assert_eq!(parse_array_id("12345"), None);
+        assert_eq!(array_base_id("12345"), None);
+        // non-numeric bases and malformed task parts are rejected
+        assert_eq!(parse_array_id("abc_1"), None);
+        assert_eq!(parse_array_id("12345_abc"), None);
+        assert_eq!(parse_array_id(""), None);
+    }
+
+    #[test]
+    fn test_pending_range_count() {
+        assert_eq!(pending_range_count("[8-99]"), 92);
+        assert_eq!(pending_range_count("[0]"), 1);
+        assert_eq!(pending_range_count("[1,3,5]"), 3);
+        assert_eq!(pending_range_count("[1-3,7,10-11]"), 6);
+        // a "%n" concurrency limit does not change the task count
+        assert_eq!(pending_range_count("[0-15%4]"), 16);
+        // unparsable input still counts as at least one task
+        assert_eq!(pending_range_count("[garbage]"), 1);
+        assert_eq!(pending_range_count(""), 1);
+    }
+
+    #[test]
+    fn test_status_abbrev() {
+        assert_eq!(JobStatus::Running.abbrev(), "R");
+        assert_eq!(JobStatus::Pending.abbrev(), "PD");
+        assert_eq!(JobStatus::Completing.abbrev(), "CG");
+        assert_eq!(JobStatus::Completed.abbrev(), "CD");
+        assert_eq!(JobStatus::Failed.abbrev(), "F");
+        assert_eq!(JobStatus::Timeout.abbrev(), "TO");
+        assert_eq!(JobStatus::Cancelled.abbrev(), "CA");
+        assert_eq!(JobStatus::Unknown.abbrev(), "?");
     }
 
     #[test]

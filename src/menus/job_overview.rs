@@ -10,6 +10,7 @@ use tui_textarea::{CursorMove, TextArea};
 use crate::app::Action;
 use crate::columns::JobColumn;
 use crate::job::{explain_reason, reason_code, Job, JobStatus};
+use crate::job_rows::JobRow;
 use crate::joblist::{JobList, JobListAction};
 use crate::menus::help::HelpContext;
 use crate::menus::OpenMenu;
@@ -255,19 +256,12 @@ impl JobOverview {
             title_names[cat_ind] = Span::styled(new_title, Style::default().fg(Color::Blue));
         }
 
-        // Create the rows for the job list
+        // Create the rows for the job list: single jobs, array-group
+        // headers and (for expanded groups) indented task rows
         let rows = jobs
-            .jobs
+            .rows()
             .iter()
-            .map(|job| {
-                Row::new(
-                    self.columns
-                        .iter()
-                        .map(|column| column.cell(job))
-                        .collect::<Vec<String>>(),
-                )
-                .style(Style::default().fg(get_job_color(job)))
-            })
+            .map(|row| self.render_row(row, jobs))
             .collect::<Vec<Row>>();
 
         // Create the widths for the columns
@@ -313,6 +307,55 @@ impl JobOverview {
         joblist_area.y += 1; // remove the header row
         joblist_area.height = joblist_area.height.saturating_sub(1);
         self.mouse_areas.joblist = joblist_area;
+    }
+
+    /// Builds one table row for a display row of the job list.
+    fn render_row<'a>(&self, row: &JobRow, jobs: &'a JobList) -> Row<'a> {
+        match row {
+            JobRow::Single { job_index } => {
+                let job = &jobs.jobs[*job_index];
+                Row::new(
+                    self.columns
+                        .iter()
+                        .map(|column| column.cell(job))
+                        .collect::<Vec<String>>(),
+                )
+                .style(Style::default().fg(get_job_color(job)))
+            }
+            JobRow::Group {
+                base_id,
+                task_indices,
+                expanded,
+            } => {
+                let tasks: Vec<&Job> = task_indices.iter().map(|&i| &jobs.jobs[i]).collect();
+                Row::new(
+                    self.columns
+                        .iter()
+                        .map(|column| column.group_cell(base_id, &tasks, *expanded))
+                        .collect::<Vec<String>>(),
+                )
+                .style(Style::default().fg(get_group_color(&tasks)))
+            }
+            JobRow::Task { job_index, last } => {
+                let job = &jobs.jobs[*job_index];
+                Row::new(
+                    self.columns
+                        .iter()
+                        .map(|column| {
+                            // indent the id with a tree glyph to show the
+                            // task belongs to the group header above
+                            if *column == JobColumn::Id {
+                                let glyph = if *last { "└" } else { "├" };
+                                format!("{} {}", glyph, job.id)
+                            } else {
+                                column.cell(job)
+                            }
+                        })
+                        .collect::<Vec<String>>(),
+                )
+                .style(Style::default().fg(get_job_color(job)))
+            }
+        }
     }
 
     fn render_squeue_command(&mut self, f: &mut Frame, area: &Rect) {
@@ -467,6 +510,28 @@ fn get_job_color(job: &Job) -> Color {
     }
 }
 
+/// The color of an array-group header row: the "most active" status of
+/// its tasks wins (running > pending/completing > failed > completed).
+fn get_group_color(tasks: &[&Job]) -> Color {
+    if tasks.iter().any(|job| job.status == JobStatus::Running) {
+        Color::Green
+    } else if tasks
+        .iter()
+        .any(|job| matches!(job.status, JobStatus::Pending | JobStatus::Completing))
+    {
+        Color::Yellow
+    } else if tasks.iter().any(|job| {
+        matches!(
+            job.status,
+            JobStatus::Failed | JobStatus::Timeout | JobStatus::Cancelled | JobStatus::Unknown
+        )
+    }) {
+        Color::Red
+    } else {
+        Color::Gray
+    }
+}
+
 // ====================================================================
 //  JOB-DETAILS INSIGHT LINES (pending reason, efficiency stats)
 // ====================================================================
@@ -613,6 +678,10 @@ impl JobOverview {
             // Open job action menu
             KeyCode::Enter | KeyCode::Char('l') => {
                 *action = Action::OpenMenu(OpenMenu::JobActions);
+            }
+            // Expand/collapse the selected job-array group
+            KeyCode::Char(' ') => {
+                *action = Action::UpdateJobList(JobListAction::ToggleGroup);
             }
             // Change sorting category
             KeyCode::Tab => {
@@ -897,6 +966,55 @@ mod tests {
         assert!(content.contains("4294901760"));
         // ... and the Nodes column is gone
         assert!(!content.contains("Nodes"));
+    }
+
+    // ----------------------------------------------------------------
+    // job-array group rows
+    // ----------------------------------------------------------------
+
+    /// A job list with two tasks of the array 12345 and one single job.
+    fn make_array_joblist() -> JobList {
+        let mut jobs = JobList::new();
+        let mut task1 = make_running_job();
+        task1.id = "12345_1".to_string();
+        let mut task2 = make_running_job();
+        task2.id = "12345_2".to_string();
+        task2.status = JobStatus::Pending;
+        jobs.jobs.push(task1);
+        jobs.jobs.push(task2);
+        jobs.jobs.push(make_running_job());
+        jobs.set_index(0).unwrap();
+        jobs
+    }
+
+    #[test]
+    fn test_render_collapsed_group_row_shows_base_id_and_counts() {
+        let jobs = make_array_joblist();
+
+        let content = render_to_string(100, 20, &jobs);
+        // the group row shows the collapsed marker, "base[]" and the
+        // aggregate status counts
+        assert!(content.contains("▶ 12345[]"));
+        assert!(content.contains("1R 1PD"));
+        // the task ids are hidden while the group is collapsed
+        assert!(!content.contains("12345_1"));
+        assert!(!content.contains("12345_2"));
+        // the single job is unaffected
+        assert!(content.contains("424242"));
+    }
+
+    #[test]
+    fn test_render_expanded_group_shows_indented_tasks() {
+        let mut jobs = make_array_joblist();
+        // expand the group under the cursor (row 0)
+        jobs.handle_joblist_action(JobListAction::ToggleGroup, &JobColumn::defaults());
+
+        let content = render_to_string(100, 20, &jobs);
+        assert!(content.contains("▼ 12345[]"));
+        // the tasks are rendered indented below the header, the last
+        // one with the closing tree glyph
+        assert!(content.contains("├ 12345_1"));
+        assert!(content.contains("└ 12345_2"));
     }
 
     /// Regression test: rendering into a terminal narrower than the

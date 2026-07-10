@@ -13,7 +13,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::job::Job;
+use crate::job::{Job, JobStatus};
+use crate::job_rows::status_counts;
 
 /// A column of the job table. Also used as the sort category of the
 /// job list: every column can be sorted by clicking its header.
@@ -134,6 +135,29 @@ impl JobColumn {
             JobColumn::Qos => job.qos.clone(),
             JobColumn::Cpus => job.cpus.to_string(),
             JobColumn::NodeList => job.nodelist.clone(),
+        }
+    }
+
+    /// The cell text of this column for a job-array group row.
+    ///
+    /// The id cell shows an expansion marker plus "base[]" (e.g.
+    /// "▶ 12345[]"), the status cell shows the aggregate task counts
+    /// (e.g. "3R 10PD 37CD") and the time cell shows the time of the
+    /// first running task (or "-" if none runs). Every other column
+    /// falls back to the first task's cell.
+    pub fn group_cell(&self, base_id: &str, tasks: &[&Job], expanded: bool) -> String {
+        match self {
+            JobColumn::Id => {
+                let marker = if expanded { "▼" } else { "▶" };
+                format!("{} {}[]", marker, base_id)
+            }
+            JobColumn::Status => status_counts(tasks),
+            JobColumn::Time => tasks
+                .iter()
+                .find(|job| job.status == JobStatus::Running)
+                .map(|job| format_time(job))
+                .unwrap_or_else(|| "-".to_string()),
+            _ => tasks.first().map(|job| self.cell(job)).unwrap_or_default(),
         }
     }
 
@@ -311,6 +335,46 @@ mod tests {
         // a job without a reason shows an empty cell
         job.reason = None;
         assert_eq!(JobColumn::Reason.cell(&job), "");
+    }
+
+    #[test]
+    fn test_group_cell() {
+        let mut running = Job::new_default();
+        running.id = "12345_3".to_string();
+        running.name = "array_job".to_string();
+        running.status = JobStatus::Running;
+        running.time = "0-01:30:00".to_string();
+        let mut pending = Job::new_default();
+        pending.id = "12345_[8-9]".to_string();
+        pending.status = JobStatus::Pending;
+        pending.time = "0:00".to_string();
+        let tasks = vec![&running, &pending];
+
+        // id: expansion marker + "base[]"
+        assert_eq!(
+            JobColumn::Id.group_cell("12345", &tasks, false),
+            "▶ 12345[]"
+        );
+        assert_eq!(JobColumn::Id.group_cell("12345", &tasks, true), "▼ 12345[]");
+        // status: aggregate counts (the [8-9] placeholder counts as 2)
+        assert_eq!(
+            JobColumn::Status.group_cell("12345", &tasks, false),
+            "1R 2PD"
+        );
+        // time: the first running task's time
+        assert_eq!(
+            JobColumn::Time.group_cell("12345", &tasks, false),
+            "01:30:00"
+        );
+        // other columns fall back to the first task
+        assert_eq!(
+            JobColumn::Name.group_cell("12345", &tasks, false),
+            "array_job"
+        );
+
+        // no running task: the time cell shows "-"
+        let tasks = vec![&pending];
+        assert_eq!(JobColumn::Time.group_cell("12345", &tasks, false), "-");
     }
 
     #[test]

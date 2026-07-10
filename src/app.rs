@@ -217,6 +217,11 @@ impl App {
         if self.menus.job_overview.columns != self.user_options.job_columns {
             self.menus.job_overview.columns = self.user_options.job_columns.clone();
         }
+        // keep the joblist's array-grouping flag in sync so toggling
+        // the option takes effect immediately (not only on the next
+        // refresh tick)
+        self.joblist
+            .set_group_job_arrays(self.user_options.group_job_arrays);
     }
 
     /// Updates the joblist (e.g. job selection, job sorting, etc.)
@@ -229,7 +234,12 @@ impl App {
     fn handle_job_action(&mut self, action: JobActions) {
         match action {
             JobActions::Kill(job) => self.open_kill_confirmation(&job),
-            JobActions::KillConfirmed(job) => self.kill_job(&job),
+            JobActions::KillConfirmed(job) => self.cancel_by_id(&job.id),
+            JobActions::KillArray {
+                base_id,
+                task_count,
+            } => self.open_kill_array_confirmation(&base_id, task_count),
+            JobActions::KillArrayConfirmed { base_id } => self.cancel_by_id(&base_id),
             JobActions::OpenLog(_) => self.open_log(),
             JobActions::OpenSubmission(_) => self.open_submissions(),
             JobActions::GoWorkDir(_) => self.go_workdir(),
@@ -267,18 +277,34 @@ impl App {
                 Action::JobOption(Box::new(JobActions::KillConfirmed(job.clone()))),
             );
         } else {
-            self.kill_job(job);
+            self.cancel_by_id(&job.id);
         }
     }
 
-    /// Kills the selected job with the "scancel" command
-    /// If the user has no permission to kill the job, an error Message
-    /// will be shown.
-    fn kill_job(&mut self, job: &Job) {
+    /// Opens a confirmation dialog to kill a whole job array
+    /// (`scancel <base_id>` cancels every task of the array).
+    fn open_kill_array_confirmation(&mut self, base_id: &str, task_count: usize) {
+        if self.user_options.confirm_before_kill {
+            let msg = format!("Kill job array {} ({} tasks)?", base_id, task_count);
+            self.menus.confirmation = Confirmation::new(
+                &msg,
+                Action::JobOption(Box::new(JobActions::KillArrayConfirmed {
+                    base_id: base_id.to_string(),
+                })),
+            );
+        } else {
+            self.cancel_by_id(base_id);
+        }
+    }
+
+    /// Cancels a job (or a whole job array, when given an array base
+    /// id) with the "scancel" command. If the user has no permission
+    /// to kill the job, an error Message will be shown.
+    fn cancel_by_id(&mut self, id: &str) {
         // A successful return only means the cancel request was
         // accepted; it does not check whether the job was actually
         // killed.
-        if let Err(error) = self.scheduler.cancel_job(&job.id) {
+        if let Err(error) = self.scheduler.cancel_job(id) {
             self.open_error_message(&format!("Error killing job: {}", error));
         }
     }
@@ -642,6 +668,57 @@ mod tests {
         assert!(app.menus.message.is_open());
         assert!(app.menus.message.text.contains("Error killing job"));
         assert!(app.menus.message.text.contains("Access/permission denied"));
+    }
+
+    #[test]
+    fn kill_array_flow_cancels_the_whole_array() {
+        let fake = Arc::new(FakeScheduler::default());
+        let mut app = app_with_fake(Arc::clone(&fake));
+
+        app.action = Action::JobOption(Box::new(JobActions::KillArray {
+            base_id: "12345".to_string(),
+            task_count: 50,
+        }));
+        app.handle_action();
+
+        // the whole array is cancelled with its base id (Slurm applies
+        // `scancel 12345` to every task of the array)
+        assert_eq!(
+            *fake.cancelled_jobs.lock().unwrap(),
+            vec!["12345".to_string()]
+        );
+    }
+
+    #[test]
+    fn kill_array_confirmation_names_the_array_and_task_count() {
+        let fake = Arc::new(FakeScheduler::default());
+        let mut app = app_with_fake(Arc::clone(&fake));
+        app.user_options.confirm_before_kill = true;
+
+        app.action = Action::JobOption(Box::new(JobActions::KillArray {
+            base_id: "12345".to_string(),
+            task_count: 50,
+        }));
+        app.handle_action();
+
+        // nothing is cancelled yet; the confirmation dialog is open
+        // and names the array and its task count
+        assert!(fake.cancelled_jobs.lock().unwrap().is_empty());
+        assert!(app.menus.confirmation.is_open());
+        assert_eq!(
+            app.menus.confirmation.message,
+            "Kill job array 12345 (50 tasks)?"
+        );
+
+        // confirming emits the confirmed action, which cancels the array
+        let mut action = Action::None;
+        app.menus.confirmation.confirm(&mut action);
+        app.action = action;
+        app.handle_action();
+        assert_eq!(
+            *fake.cancelled_jobs.lock().unwrap(),
+            vec!["12345".to_string()]
+        );
     }
 
     /// Creates an app whose selected job is running and whose fake

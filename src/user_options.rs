@@ -27,6 +27,9 @@ pub struct UserOptions {
     // starts or finishes; needs a supporting terminal (kitty, foot,
     // WezTerm, Ghostty), other terminals ignore it
     pub notify_desktop: bool,
+    // Collapse tasks of the same job array (e.g. "12345_1", "12345_2")
+    // into a single expandable group row
+    pub group_job_arrays: bool,
 }
 
 impl Default for UserOptions {
@@ -40,6 +43,7 @@ impl Default for UserOptions {
             job_columns: JobColumn::defaults(),
             notify_bell: false,
             notify_desktop: false,
+            group_job_arrays: true,
         }
     }
 }
@@ -152,6 +156,7 @@ mod tests {
             ],
             notify_bell: true,
             notify_desktop: true,
+            group_job_arrays: false,
         }
     }
 
@@ -204,6 +209,8 @@ mod tests {
         // configs without the notification keys keep them disabled
         assert!(!loaded.notify_bell);
         assert!(!loaded.notify_desktop);
+        // configs without the grouping key keep job arrays grouped
+        assert!(loaded.group_job_arrays);
         // regression guard: a config without a `job_columns` key keeps
         // the historical six columns in the same order
         assert_eq!(loaded.job_columns, JobColumn::defaults());

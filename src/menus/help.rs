@@ -91,6 +91,7 @@ impl HelpMenu {
         let job_overview_entries = vec![
             HelpEntry::new("Down/Up (j/k)", "Next/Previous job"),
             HelpEntry::new("Enter (l)", "Open job actions menu"),
+            HelpEntry::new("Space", "Expand/collapse the selected job array group"),
             HelpEntry::new("tab", "Select next sorting category"),
             HelpEntry::new("r", "Reverse sorting order"),
             HelpEntry::new("1", "Toggle job details"),
@@ -142,6 +143,10 @@ impl HelpMenu {
             HelpEntry::new(
                 "Desktop notification",
                 "Notify when a job starts or finishes (OSC 777; needs kitty, foot, WezTerm or Ghostty)",
+            ),
+            HelpEntry::new(
+                "Group job arrays",
+                "Collapse tasks of the same job array into one expandable row (toggle with Space)",
             ),
         ];
         let stama_settings = HelpCategory::new("Stama Settings", stama_settings_entries);

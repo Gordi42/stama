@@ -59,6 +59,10 @@ impl UserOptionsMenu {
                 "Desktop notification on job start/finish",
                 TextFieldType::Boolean(list.notify_desktop),
             ),
+            TextField::new(
+                "Group job arrays",
+                TextFieldType::Boolean(list.group_job_arrays),
+            ),
         ];
 
         Self {
@@ -124,6 +128,10 @@ impl UserOptionsMenu {
             notify_desktop: match &self.entries[7].field_type {
                 TextFieldType::Boolean(b) => *b,
                 _ => false,
+            },
+            group_job_arrays: match &self.entries[8].field_type {
+                TextFieldType::Boolean(b) => *b,
+                _ => true,
             },
         }
     }
