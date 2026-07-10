@@ -33,15 +33,15 @@ jobs:
           # We build on ubuntu-22.04 (not -latest) on purpose: the resulting
           # gnu binaries link against an older glibc, so they run on the aging
           # distros commonly found on HPC cluster login nodes.
-          # The musl targets are fully static binaries that work even on
+          # The musl target is a fully static binary that works even on
           # CentOS7-era login nodes where the system glibc is too old.
+          # (aarch64-musl is intentionally absent: it fails to link on the
+          # arm runners and aarch64 login nodes are modern enough for gnu.)
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
           - target: x86_64-unknown-linux-musl
             os: ubuntu-22.04
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04-arm
-          - target: aarch64-unknown-linux-musl
             os: ubuntu-22.04-arm
     runs-on: ${{ matrix.os }}
     steps:
