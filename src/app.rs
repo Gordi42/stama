@@ -366,7 +366,7 @@ impl App {
         // At the moment, I don't know how to decode it to the file path.
         // So I just show the command.
         if job.is_completed() {
-            let mes = format!("Job was submitted with: \n {}", &job.command);
+            let mes = format!("Job was submitted with: \n {}", job.command);
             self.menus.message = Message::new(&mes);
             return;
         }

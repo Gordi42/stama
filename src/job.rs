@@ -315,7 +315,7 @@ impl Job {
                         // Parse the number as usize
                         if let Ok(num) = num_str.parse::<usize>() {
                             // Generate the replacement string with the job ID
-                            format!("{:0>width$}", &self.id, width = num)
+                            format!("{:0>width$}", self.id, width = num)
                         } else {
                             // If parsing fails, return the original match
                             caps[0].to_string()
