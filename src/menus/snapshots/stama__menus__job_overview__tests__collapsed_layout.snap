@@ -1,0 +1,29 @@
+---
+source: src/menus/job_overview.rs
+assertion_line: 1203
+expression: terminal.backend()
+---
+"                                         SLURM TASK MANAGER                                         "
+"▶ Job:        424242         train_model   Running       12:34:56      gpu            2             "
+"▶ 1. Job details  2. Log                                                                            "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "

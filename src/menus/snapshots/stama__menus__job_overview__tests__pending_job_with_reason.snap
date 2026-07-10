@@ -1,0 +1,29 @@
+---
+source: src/menus/job_overview.rs
+assertion_line: 1229
+expression: terminal.backend()
+---
+"                                         SLURM TASK MANAGER                                         "
+"╭▼ Job list: squeue -u user ─────────────────────────────────────────────────────────────────250 ms╮"
+"│ID ▼             Name            Status           Time            Partition        Nodes          │"
+"│424242           train_model     Running          12:34:56        gpu              2              │"
+"│424243           preprocess      Pending          0:00            gpu              1              │"
+"│424241           download_data   Completed        1:23:45         cpu              1              │"
+"│                                                                                                  │"
+"╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+"╭▼ 1. Job details  2. Log──────────────────────────────────────────────────────────────────────────╮"
+"│⏳ Pending — Priority: waiting: higher-priority jobs are ahead in the queue                       │" Hidden by multi-width symbols: [(2, " ")]
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"

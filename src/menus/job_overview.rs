@@ -1139,4 +1139,123 @@ mod tests {
         assert_eq!(time_limit_color(0.8), Color::Yellow);
         assert_eq!(time_limit_color(0.95), Color::Red);
     }
+
+    // ----------------------------------------------------------------
+    // snapshot tests: lock in the exact rendered frames
+    // ----------------------------------------------------------------
+    //
+    // All inputs are fixed (job fields, refresh rate, squeue command,
+    // grouping flag), so the frames are deterministic. The squeue
+    // command shown in the title comes from `JobOverview::new`'s
+    // argument, not from `JobList` (whose $USER-derived command is
+    // never rendered here), so the snapshots do not depend on the
+    // environment.
+
+    /// Renders the overview into a 100x24 test terminal with fixed,
+    /// deterministic inputs and returns the terminal for snapshotting.
+    fn snapshot_terminal(
+        jobs: &JobList,
+        collapsed_top: bool,
+        collapsed_bot: bool,
+    ) -> Terminal<TestBackend> {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut overview = JobOverview::new(250, "squeue -u user", JobColumn::defaults());
+        overview.collapsed_top = collapsed_top;
+        overview.collapsed_bot = collapsed_bot;
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                overview.render(f, &area, jobs);
+            })
+            .unwrap();
+        terminal
+    }
+
+    /// A job list with a few fixed single jobs (no array groups).
+    fn make_snapshot_joblist() -> JobList {
+        let mut jobs = JobList::new();
+        jobs.set_group_job_arrays(true);
+        jobs.jobs.push(make_running_job());
+        let mut pending = make_running_job();
+        pending.id = "424243".to_string();
+        pending.name = "preprocess".to_string();
+        pending.status = JobStatus::Pending;
+        pending.time = "0:00".to_string();
+        pending.nodes = 1;
+        jobs.jobs.push(pending);
+        let mut done = make_running_job();
+        done.id = "424241".to_string();
+        done.name = "download_data".to_string();
+        done.status = JobStatus::Completed;
+        done.time = "1:23:45".to_string();
+        done.partition = "cpu".to_string();
+        done.nodes = 1;
+        jobs.jobs.push(done);
+        jobs.set_index(0).unwrap();
+        jobs
+    }
+
+    #[test]
+    fn test_snapshot_collapsed_layout() {
+        let jobs = make_snapshot_joblist();
+        let terminal = snapshot_terminal(&jobs, true, true);
+        insta::assert_snapshot!("collapsed_layout", terminal.backend());
+    }
+
+    #[test]
+    fn test_snapshot_extended_layout() {
+        let jobs = make_snapshot_joblist();
+        let terminal = snapshot_terminal(&jobs, false, false);
+        insta::assert_snapshot!("extended_layout", terminal.backend());
+    }
+
+    #[test]
+    fn test_snapshot_empty_joblist() {
+        let mut jobs = JobList::new();
+        jobs.set_group_job_arrays(true);
+        jobs.set_index(0).unwrap();
+        let terminal = snapshot_terminal(&jobs, false, true);
+        insta::assert_snapshot!("empty_joblist", terminal.backend());
+    }
+
+    #[test]
+    fn test_snapshot_pending_job_with_reason() {
+        let mut jobs = make_snapshot_joblist();
+        jobs.jobs[1].reason = Some("Priority".to_string());
+        // select the pending job so its reason shows in the details pane
+        jobs.set_index(1).unwrap();
+        let terminal = snapshot_terminal(&jobs, false, false);
+        insta::assert_snapshot!("pending_job_with_reason", terminal.backend());
+    }
+
+    #[test]
+    fn test_snapshot_running_job_with_stats() {
+        let mut jobs = make_snapshot_joblist();
+        jobs.jobs[0].stats = Some(Box::new(crate::job::JobStats {
+            cpu_efficiency: Some(0.85),
+            mem_efficiency: Some(0.42),
+            elapsed_frac_of_limit: Some(0.61),
+        }));
+        jobs.set_index(0).unwrap();
+        let terminal = snapshot_terminal(&jobs, false, false);
+        insta::assert_snapshot!("running_job_with_stats", terminal.backend());
+    }
+
+    #[test]
+    fn test_snapshot_array_group_collapsed() {
+        let mut jobs = make_array_joblist();
+        jobs.set_group_job_arrays(true);
+        let terminal = snapshot_terminal(&jobs, false, true);
+        insta::assert_snapshot!("array_group_collapsed", terminal.backend());
+    }
+
+    #[test]
+    fn test_snapshot_array_group_expanded() {
+        let mut jobs = make_array_joblist();
+        jobs.set_group_job_arrays(true);
+        jobs.handle_joblist_action(JobListAction::ToggleGroup, &JobColumn::defaults());
+        let terminal = snapshot_terminal(&jobs, false, true);
+        insta::assert_snapshot!("array_group_expanded", terminal.backend());
+    }
 }

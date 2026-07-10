@@ -1,0 +1,29 @@
+---
+source: src/menus/job_overview.rs
+assertion_line: 1259
+expression: terminal.backend()
+---
+"                                         SLURM TASK MANAGER                                         "
+"╭▼ Job list: squeue -u user ─────────────────────────────────────────────────────────────────250 ms╮"
+"│ID ▼             Name            Status           Time            Partition        Nodes          │"
+"│▼ 12345[]        train_model     1R 1PD           12:34:56        gpu              2              │"
+"│├ 12345_1        train_model     Running          12:34:56        gpu              2              │"
+"│└ 12345_2        train_model     Pending          12:34:56        gpu              2              │"
+"│424242           train_model     Running          12:34:56        gpu              2              │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+"▶ 1. Job details  2. Log                                                                            "

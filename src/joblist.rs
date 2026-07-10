@@ -1224,3 +1224,190 @@ mod tests {
         }
     }
 }
+
+// ====================================================================
+//  PROPERTY TESTS: selection invariants
+// ====================================================================
+//
+// Whatever sequence of navigation, sorting, grouping and refresh
+// events hits the job list, the selected index must stay within the
+// visible rows (or be 0 for an empty list) and the row-based getters
+// must never panic.
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::columns::ALL_COLUMNS;
+    use crate::job::JobStatus;
+    use proptest::prelude::*;
+
+    /// A random user/refresh event, applied through the public API
+    /// (or, for `Refresh`, through the same steps `update_jobs`
+    /// performs when new content arrives).
+    #[derive(Debug, Clone)]
+    enum Action {
+        Next,
+        Previous,
+        /// A mouse click on a (possibly out-of-bounds) row index.
+        Select(usize),
+        NextSortCategory,
+        ReverseSortDirection,
+        /// An index into [`ALL_COLUMNS`].
+        SelectSortCategory(usize),
+        /// Space: expand/collapse the selected array-group row.
+        ToggleGroup,
+        /// The "group job arrays" user option changed.
+        SetGrouping(bool),
+        /// A refresh tick replaced the job list.
+        Refresh(Vec<Job>),
+    }
+
+    /// Random job ids: plain, array tasks (with a few shared bases so
+    /// that groups actually form), pending-range placeholders and
+    /// non-numeric garbage. Duplicates are possible on purpose.
+    fn job_id() -> impl Strategy<Value = String> {
+        prop_oneof![
+            "[0-9]{1,4}",
+            "10[0-2]_[0-9]",
+            "[0-9]{1,3}_[0-9]{1,2}",
+            "10[0-2]_\\[[0-9]-[1-9][0-9]\\]",
+            "[a-z]{1,4}",
+        ]
+    }
+
+    fn status() -> impl Strategy<Value = JobStatus> {
+        prop_oneof![
+            Just(JobStatus::Unknown),
+            Just(JobStatus::Running),
+            Just(JobStatus::Pending),
+            Just(JobStatus::Completing),
+            Just(JobStatus::Completed),
+            Just(JobStatus::Timeout),
+            Just(JobStatus::Cancelled),
+            Just(JobStatus::Failed),
+        ]
+    }
+
+    fn job() -> impl Strategy<Value = Job> {
+        (
+            job_id(),
+            status(),
+            0..5u32,
+            "[0-9]-[0-9]{2}:[0-9]{2}:[0-9]{2}",
+            any::<u16>(),
+            0..64u32,
+        )
+            .prop_map(|(id, status, nodes, time, priority, cpus)| {
+                let mut job = Job::new(
+                    &id,
+                    "job",
+                    status,
+                    &time,
+                    "part",
+                    nodes,
+                    "/w",
+                    "/w/run.sh",
+                    None,
+                );
+                job.priority = priority as u64;
+                job.cpus = cpus;
+                job
+            })
+    }
+
+    fn jobs() -> impl Strategy<Value = Vec<Job>> {
+        prop::collection::vec(job(), 0..30)
+    }
+
+    fn action() -> impl Strategy<Value = Action> {
+        prop_oneof![
+            Just(Action::Next),
+            Just(Action::Previous),
+            (0..40usize).prop_map(Action::Select),
+            Just(Action::NextSortCategory),
+            Just(Action::ReverseSortDirection),
+            (0..ALL_COLUMNS.len()).prop_map(Action::SelectSortCategory),
+            Just(Action::ToggleGroup),
+            any::<bool>().prop_map(Action::SetGrouping),
+            jobs().prop_map(Action::Refresh),
+        ]
+    }
+
+    fn apply(job_list: &mut JobList, action: Action, columns: &[JobColumn]) {
+        match action {
+            Action::Next => job_list.handle_joblist_action(JobListAction::Next, columns),
+            Action::Previous => job_list.handle_joblist_action(JobListAction::Previous, columns),
+            Action::Select(index) => {
+                job_list.handle_joblist_action(JobListAction::Select(index), columns)
+            }
+            Action::NextSortCategory => {
+                job_list.handle_joblist_action(JobListAction::NextSortCategory, columns)
+            }
+            Action::ReverseSortDirection => {
+                job_list.handle_joblist_action(JobListAction::ReverseSortDirection, columns)
+            }
+            Action::SelectSortCategory(index) => job_list.handle_joblist_action(
+                JobListAction::SelectSortCategory(ALL_COLUMNS[index]),
+                columns,
+            ),
+            Action::ToggleGroup => {
+                job_list.handle_joblist_action(JobListAction::ToggleGroup, columns)
+            }
+            Action::SetGrouping(grouping) => job_list.set_group_job_arrays(grouping),
+            Action::Refresh(new_jobs) => {
+                // the same steps update_jobs performs when the worker
+                // delivers new content (see JobList::update_jobs)
+                let key = job_list.selected_row_key();
+                job_list.jobs = new_jobs;
+                job_list.sort_raw();
+                if let Some(key) = key {
+                    job_list.reselect_row(&key);
+                }
+            }
+        }
+    }
+
+    /// The invariants that must hold after every single step.
+    fn check_invariants(job_list: &JobList) -> Result<(), TestCaseError> {
+        let rows = job_list.rows();
+        if rows.is_empty() {
+            prop_assert_eq!(job_list.get_index(), 0, "empty list must select index 0");
+            prop_assert!(job_list.get_job().is_none());
+        } else {
+            prop_assert!(
+                job_list.get_index() < rows.len(),
+                "selected index {} out of bounds of {} visible rows",
+                job_list.get_index(),
+                rows.len()
+            );
+            prop_assert!(
+                job_list.get_job().is_some(),
+                "an in-bounds selection must yield a job"
+            );
+        }
+        // the derived row getters must never panic either
+        let _ = job_list.selected_row_key();
+        let _ = job_list.selected_group();
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+        #[test]
+        fn selection_stays_in_bounds_under_any_action_sequence(
+            initial in jobs(),
+            actions in prop::collection::vec(action(), 0..50),
+        ) {
+            let columns = JobColumn::defaults();
+            let mut job_list = JobList::new();
+            job_list.jobs = initial;
+            job_list.sort_raw();
+            check_invariants(&job_list)?;
+            for action in actions {
+                apply(&mut job_list, action, &columns);
+                check_invariants(&job_list)?;
+            }
+        }
+    }
+}

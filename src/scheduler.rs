@@ -1333,3 +1333,158 @@ mod tests {
         assert!(text.contains('\u{FFFD}'));
     }
 }
+
+// ====================================================================
+//  PROPERTY TESTS: the parsers are total (never panic)
+// ====================================================================
+//
+// Every parser in this file consumes output of external commands, so
+// none of them may panic, no matter how mangled the input is (error
+// messages, help text, truncated output, other Slurm versions, ...).
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// One "almost valid" field of a delimiter-separated output line:
+    /// plausible Slurm values, garbage, and — most importantly — the
+    /// field delimiters themselves.
+    fn field() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just(String::new()),
+            "[a-zA-Z0-9_/.:%=-]{0,12}",
+            "[0-9]{1,12}",
+            // duration-shaped values (with/without days and fractions)
+            "([0-9]{1,2}-)?[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?(\\.[0-9]{1,3})?",
+            // memory-shaped values
+            "[0-9]{1,6}(\\.[0-9]{1,2})?[KMGTkmgt]?[ncNC]?",
+            // status codes of both squeue and sacct
+            prop_oneof![
+                Just("R"),
+                Just("PD"),
+                Just("CG"),
+                Just("COMPLETED"),
+                Just("CANCELLED by 4242"),
+                Just("FAILED"),
+                Just("TIMEOUT"),
+                Just("RUNNING"),
+                Just("PENDING"),
+                Just("UNLIMITED"),
+                Just("Partition_Limit"),
+                Just("N/A"),
+                Just("None"),
+            ]
+            .prop_map(str::to_string),
+            // the delimiters themselves, to probe field-count handling
+            prop_oneof![Just("|"), Just("|%|"), Just("%"), Just("||")].prop_map(str::to_string),
+            // arbitrary printable noise
+            "\\PC{0,8}",
+        ]
+    }
+
+    /// An "almost valid" command output: 0..8 lines, each with a random
+    /// field count in 0..20, joined by the given delimiter. Because the
+    /// fields may contain delimiters themselves, this probes the
+    /// field-count boundaries much harder than pure noise.
+    fn almost_valid_output(delimiter: &'static str) -> impl Strategy<Value = String> {
+        let line =
+            prop::collection::vec(field(), 0..20).prop_map(move |fields| fields.join(delimiter));
+        prop::collection::vec(line, 0..8).prop_map(|lines| lines.join("\n"))
+    }
+
+    /// A hostlist-shaped string for parse_node_list: valid expressions,
+    /// unbalanced brackets, reversed and pathological ranges, noise.
+    fn hostlist_ish() -> impl Strategy<Value = String> {
+        let item = prop_oneof![
+            "[a-z]{1,4}[0-9]{0,3}",
+            "[a-z]{1,3}\\[[0-9]{1,3}-[0-9]{1,3}\\]",
+            "[a-z]{1,3}\\[[0-9]{1,2}(,[0-9]{1,2}){0,3}\\]",
+            "[a-z]{1,3}\\[[0-9]{1,3}",
+            Just("[".to_string()),
+            Just("]".to_string()),
+            Just("n[5-3]".to_string()),
+            Just("n[a-b]".to_string()),
+            Just("n[0-999999999]".to_string()),
+            Just("n[18446744073709551615-18446744073709551615]".to_string()),
+            "\\PC{0,8}",
+        ];
+        prop::collection::vec(item, 0..6).prop_map(|items| items.join(","))
+    }
+
+    /// Calls every pure parser of this module on the given text.
+    fn call_all_parsers(text: &str) {
+        let _ = format_squeue_output(text);
+        let _ = format_sacct_output(text);
+        let _ = parse_node_list(text);
+        let _ = parse_slurm_duration(text);
+        let _ = parse_mem_size(text);
+        let _ = parse_req_mem(text, 2, 8);
+        let _ = parse_job_stats(text, "1001");
+        let _ = sacct_user_filter(text);
+        let _ = format_time_used(text);
+        let _ = format_time_pending(text);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+        /// No parser panics on arbitrary printable unicode.
+        #[test]
+        fn parsers_never_panic_on_arbitrary_unicode(s in "\\PC*") {
+            call_all_parsers(&s);
+        }
+
+        /// No parser panics on arbitrary bytes (lossily converted, the
+        /// same way run_command converts command output).
+        #[test]
+        fn parsers_never_panic_on_lossy_bytes(
+            bytes in prop::collection::vec(any::<u8>(), 0..512),
+        ) {
+            let s = String::from_utf8_lossy(&bytes);
+            call_all_parsers(&s);
+        }
+
+        /// The squeue parser never panics on almost-valid "|%|" lines,
+        /// and the sacct parsers tolerate the squeue delimiter too.
+        #[test]
+        fn parsers_never_panic_on_almost_valid_squeue_lines(
+            output in almost_valid_output("|%|"),
+        ) {
+            let _ = format_squeue_output(&output);
+            let _ = format_sacct_output(&output);
+            let _ = parse_job_stats(&output, "1001");
+        }
+
+        /// The sacct parsers never panic on almost-valid "|" lines (for
+        /// parse_job_stats the job id is sometimes present, sometimes
+        /// not), and the squeue parser tolerates the sacct delimiter.
+        #[test]
+        fn parsers_never_panic_on_almost_valid_sacct_lines(
+            output in almost_valid_output("|"),
+            job_id in prop_oneof!["[0-9]{1,6}", Just("1001".to_string()), "\\PC{0,8}"],
+        ) {
+            let _ = format_sacct_output(&output);
+            let _ = parse_job_stats(&output, &job_id);
+            let _ = format_squeue_output(&output);
+        }
+
+        /// parse_req_mem never panics for any node/CPU count.
+        #[test]
+        fn parse_req_mem_never_panics(
+            text in "\\PC{0,16}",
+            nodes in any::<u32>(),
+            cpus in any::<u32>(),
+        ) {
+            let _ = parse_req_mem(&text, nodes, cpus);
+        }
+
+        /// parse_node_list never panics on hostlist-shaped input and
+        /// the expansion is always capped.
+        #[test]
+        fn parse_node_list_never_panics_and_is_capped(raw in hostlist_ish()) {
+            let nodes = parse_node_list(&raw);
+            prop_assert!(nodes.len() <= MAX_EXPANDED_NODES);
+        }
+    }
+}
