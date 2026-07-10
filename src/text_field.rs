@@ -3,7 +3,7 @@ use ratatui::{
     prelude::*,
     style::{Color, Style},
 };
-use tui_textarea::{CursorMove, TextArea};
+use ratatui_textarea::{CursorMove, TextArea};
 
 use crate::columns::{columns_to_string, parse_columns, JobColumn};
 

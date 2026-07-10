@@ -5,7 +5,7 @@ use ratatui::{
     style::{Color, Style},
     widgets::*,
 };
-use tui_textarea::{CursorMove, TextArea};
+use ratatui_textarea::{CursorMove, TextArea};
 
 use crate::app::Action;
 use crate::columns::JobColumn;
@@ -609,7 +609,7 @@ fn bar_string(fraction: f64, width: usize) -> String {
     let clamped = fraction.clamp(0.0, 1.0);
     let eighths = (clamped * (width * 8) as f64).round() as usize;
     let mut bar = "█".repeat(eighths / 8);
-    if eighths % 8 > 0 {
+    if !eighths.is_multiple_of(8) {
         bar.push(PARTIAL_BLOCKS[eighths % 8]);
     }
     let filled = bar.chars().count();

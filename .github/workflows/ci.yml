@@ -36,13 +36,13 @@ jobs:
 
   # Verify the minimum supported Rust version still builds.
   # NOTE: the toolchain version below must stay in sync with the
-  # `rust-version` field in Cargo.toml.
+  # `rust-version` field in Cargo.toml (currently 1.88).
   msrv:
-    name: MSRV (1.85)
+    name: MSRV (1.88)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
       - name: Check with MSRV
         run: cargo check --all-targets
