@@ -11,6 +11,7 @@ use crate::{
 pub mod app;
 pub mod columns;
 pub mod event;
+pub mod filter;
 pub mod job;
 pub mod job_rows;
 pub mod joblist;

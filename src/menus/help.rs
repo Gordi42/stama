@@ -101,7 +101,12 @@ impl HelpMenu {
             HelpEntry::new("2", "Toggle log"),
             HelpEntry::new("a", "Open allocation menu"),
             HelpEntry::new("o", "Open stama settings menu"),
-            HelpEntry::new("/", "Modify job list filter"),
+            HelpEntry::new("/", "Edit the squeue command that fetches the job list"),
+            HelpEntry::new(
+                "f",
+                "Filter the visible jobs while typing (case-insensitive substring over the displayed columns; input with regex characters that compiles, e.g. 'gpu|cpu', is matched as a regex). Enter keeps the filter, Esc in the prompt cancels and clears it",
+            ),
+            HelpEntry::new("Esc", "Clear the active job filter"),
             HelpEntry::new("m", "Minimize/Maximize top section"),
         ];
         let job_overview = HelpCategory::new("Job Overview", job_overview_entries);

@@ -44,6 +44,10 @@ pub struct JobOverview {
     pub refresh_rate: usize,               // the refresh rate of the window
     pub log_height: u16,                   // the height of the log section
     pub columns: Vec<JobColumn>,           // the configured job table columns
+    pub filter_prompt: bool,               // if the filter prompt is open
+    // the filter input; mirrors the joblist's active display filter
+    // (it is applied live on every keystroke)
+    pub filter_input: String,
 }
 
 // ====================================================================
@@ -73,6 +77,8 @@ impl JobOverview {
             refresh_rate,
             log_height: 0,
             columns,
+            filter_prompt: false,
+            filter_input: String::new(),
         }
     }
 }
@@ -90,6 +96,19 @@ impl JobOverview {
         let new_command = self.get_squeue_command();
         *action = Action::UpdateJobList(JobListAction::UpdateSqueueCommand(new_command));
         self.edit_squeue = false;
+    }
+
+    /// Applies the current filter input to the job list (an empty
+    /// input clears the filter). Called on every prompt keystroke, so
+    /// the visible rows narrow live while typing.
+    fn apply_filter(&self, action: &mut Action) {
+        *action = Action::UpdateJobList(JobListAction::SetFilter(self.filter_input.clone()));
+    }
+
+    /// Clears the filter input and the joblist's display filter.
+    fn clear_filter(&mut self, action: &mut Action) {
+        self.filter_input.clear();
+        self.apply_filter(action);
     }
 }
 
@@ -195,11 +214,30 @@ impl JobOverview {
 
         let refresh_rate = format!("{} ms", self.refresh_rate);
 
-        let block = Block::default()
+        let mut block = Block::default()
             .title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .title_top(Line::from(refresh_rate).alignment(Alignment::Right));
+
+        // the filter prompt / active-filter indicator in the bottom
+        // border of the job list (only rendered while filtering, so
+        // the frame is unchanged when no filter is involved)
+        if self.filter_prompt {
+            block = block.title_bottom(
+                Line::from(format!(" filter: {}▏", self.filter_input))
+                    .alignment(Alignment::Left)
+                    .style(Style::default().fg(Color::Yellow)),
+            );
+        } else if let Some(text) = jobs.filter_text() {
+            let indicator = format!(
+                " filter: {} ({}/{}) ",
+                text,
+                jobs.filter_match_count(),
+                jobs.jobs.len()
+            );
+            block = block.title_bottom(Line::from(indicator).alignment(Alignment::Left));
+        }
 
         // update the mouse areas
         // clip manually constructed rects to the frame area: rendering a
@@ -228,6 +266,17 @@ impl JobOverview {
 
         if jobs.is_empty() {
             self.render_empty_joblist(f, &joblist_area);
+            return;
+        }
+
+        // there are jobs, but the active filter hides all of them
+        // (jobs.len() counts the *visible* rows, jobs.is_empty() the
+        // unfiltered job list, hence no is_empty() shorthand here)
+        let visible_rows = jobs.len();
+        if visible_rows == 0 {
+            let text = Span::styled("No jobs match the filter", Style::default().fg(Color::Gray));
+            let paragraph = Paragraph::new(text).alignment(Alignment::Center);
+            f.render_widget(paragraph, joblist_area);
             return;
         }
 
@@ -663,6 +712,37 @@ impl JobOverview {
             }
         }
 
+        // the filter prompt captures every key while it is open; the
+        // filter is applied live on each edit
+        if self.filter_prompt {
+            match key_event.code {
+                // cancel: close the prompt and clear the filter
+                KeyCode::Esc => {
+                    self.filter_prompt = false;
+                    self.clear_filter(action);
+                }
+                // confirm: close the prompt, keep the (already
+                // applied) filter active
+                KeyCode::Enter => {
+                    self.filter_prompt = false;
+                    if self.filter_input.is_empty() {
+                        // confirming an empty prompt clears the filter
+                        self.apply_filter(action);
+                    }
+                }
+                KeyCode::Backspace => {
+                    self.filter_input.pop();
+                    self.apply_filter(action);
+                }
+                KeyCode::Char(c) => {
+                    self.filter_input.push(c);
+                    self.apply_filter(action);
+                }
+                _ => {}
+            }
+            return true;
+        }
+
         match key_event.code {
             // Escaping the program
             KeyCode::Char('q') => {
@@ -725,6 +805,19 @@ impl JobOverview {
             KeyCode::Char('/') => {
                 self.collapsed_top = false;
                 self.edit_squeue = true;
+            }
+            // Open the filter prompt (prefilled with the active filter)
+            KeyCode::Char('f') => {
+                self.collapsed_top = false;
+                self.filter_prompt = true;
+            }
+            // Esc clears an active filter (it is otherwise unbound in
+            // the job overview)
+            KeyCode::Esc => {
+                if self.filter_input.is_empty() {
+                    return false;
+                }
+                self.clear_filter(action);
             }
             _ => {
                 return false;
@@ -790,6 +883,12 @@ impl JobOverview {
                     // to normal mode
                     if self.edit_squeue {
                         self.exit_squeue_edit(action);
+                        return;
+                    }
+                    // a click closes the filter prompt (the live
+                    // applied filter stays active, like Enter)
+                    if self.filter_prompt {
+                        self.filter_prompt = false;
                         return;
                     }
                     // joblist title
@@ -1021,6 +1120,177 @@ mod tests {
         assert!(content.contains("└ 12345_2"));
     }
 
+    // ----------------------------------------------------------------
+    // display filter (prompt, indicator, filtered rows)
+    // ----------------------------------------------------------------
+
+    use crossterm::event::KeyModifiers;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// A job list with three distinctly named jobs.
+    fn make_filter_joblist() -> JobList {
+        let mut jobs = JobList::new();
+        jobs.jobs.push(make_running_job());
+        let mut preprocess = make_running_job();
+        preprocess.id = "424243".to_string();
+        preprocess.name = "preprocess".to_string();
+        preprocess.status = JobStatus::Pending;
+        jobs.jobs.push(preprocess);
+        let mut download = make_running_job();
+        download.id = "424241".to_string();
+        download.name = "download_data".to_string();
+        jobs.jobs.push(download);
+        jobs.set_index(0).unwrap();
+        jobs
+    }
+
+    #[test]
+    fn test_render_active_filter_shows_indicator_and_reduced_rows() {
+        let mut jobs = make_filter_joblist();
+        jobs.set_filter("train", &JobColumn::defaults());
+
+        let content = render_to_string(100, 20, &jobs);
+        // the indicator shows the filter text and matching/total counts
+        assert!(content.contains("filter: train (1/3)"));
+        // only the matching job is listed
+        assert!(content.contains("train_model"));
+        assert!(!content.contains("preprocess"));
+        assert!(!content.contains("download_data"));
+    }
+
+    #[test]
+    fn test_render_without_filter_shows_no_indicator() {
+        let jobs = make_filter_joblist();
+        let content = render_to_string(100, 20, &jobs);
+        assert!(!content.contains("filter:"));
+    }
+
+    #[test]
+    fn test_render_filter_without_matches_shows_empty_hint() {
+        let mut jobs = make_filter_joblist();
+        jobs.set_filter("no such job", &JobColumn::defaults());
+
+        let content = render_to_string(100, 20, &jobs);
+        assert!(content.contains("No jobs match the filter"));
+        assert!(content.contains("filter: no such job (0/3)"));
+        // distinct from the empty-joblist message
+        assert!(!content.contains("No jobs found"));
+    }
+
+    #[test]
+    fn test_render_open_filter_prompt_shows_input_and_cursor() {
+        let jobs = make_filter_joblist();
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut overview = JobOverview::new(250, "squeue -u user", JobColumn::defaults());
+        let mut action = Action::None;
+        overview.input(&mut action, key(KeyCode::Char('f')));
+        for c in "gpu".chars() {
+            overview.input(&mut action, key(KeyCode::Char(c)));
+        }
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                overview.render(f, &area, &jobs);
+            })
+            .unwrap();
+        let content: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(content.contains("filter: gpu▏"));
+    }
+
+    #[test]
+    fn test_filter_key_opens_prompt_and_typing_emits_filter_actions() {
+        let mut overview = JobOverview::new(250, "squeue -u user", JobColumn::defaults());
+        let mut action = Action::None;
+
+        // 'f' opens the prompt (and expands a collapsed job list)
+        overview.collapsed_top = true;
+        assert!(overview.input(&mut action, key(KeyCode::Char('f'))));
+        assert!(overview.filter_prompt);
+        assert!(!overview.collapsed_top);
+
+        // every keystroke applies the filter live
+        overview.input(&mut action, key(KeyCode::Char('g')));
+        match &action {
+            Action::UpdateJobList(JobListAction::SetFilter(text)) => assert_eq!(text, "g"),
+            other => panic!("expected SetFilter, got {:?}", other),
+        }
+        overview.input(&mut action, key(KeyCode::Char('p')));
+        overview.input(&mut action, key(KeyCode::Char('u')));
+        match &action {
+            Action::UpdateJobList(JobListAction::SetFilter(text)) => assert_eq!(text, "gpu"),
+            other => panic!("expected SetFilter, got {:?}", other),
+        }
+
+        // Backspace edits the input
+        overview.input(&mut action, key(KeyCode::Backspace));
+        match &action {
+            Action::UpdateJobList(JobListAction::SetFilter(text)) => assert_eq!(text, "gp"),
+            other => panic!("expected SetFilter, got {:?}", other),
+        }
+
+        // Enter confirms: the prompt closes, the input is kept
+        action = Action::None;
+        overview.input(&mut action, key(KeyCode::Enter));
+        assert!(!overview.filter_prompt);
+        assert_eq!(overview.filter_input, "gp");
+        assert!(matches!(action, Action::None));
+
+        // reopening the prompt keeps the input prefilled
+        overview.input(&mut action, key(KeyCode::Char('f')));
+        assert!(overview.filter_prompt);
+        assert_eq!(overview.filter_input, "gp");
+    }
+
+    #[test]
+    fn test_escape_in_prompt_cancels_and_clears_the_filter() {
+        let mut overview = JobOverview::new(250, "squeue -u user", JobColumn::defaults());
+        let mut action = Action::None;
+
+        overview.input(&mut action, key(KeyCode::Char('f')));
+        overview.input(&mut action, key(KeyCode::Char('x')));
+        overview.input(&mut action, key(KeyCode::Esc));
+
+        assert!(!overview.filter_prompt);
+        assert_eq!(overview.filter_input, "");
+        match &action {
+            Action::UpdateJobList(JobListAction::SetFilter(text)) => assert!(text.is_empty()),
+            other => panic!("expected a clearing SetFilter, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_escape_outside_prompt_clears_an_active_filter() {
+        let mut overview = JobOverview::new(250, "squeue -u user", JobColumn::defaults());
+        let mut action = Action::None;
+
+        // no filter active: Esc is not consumed
+        assert!(!overview.input(&mut action, key(KeyCode::Esc)));
+
+        // confirm a filter, then Esc clears it
+        overview.input(&mut action, key(KeyCode::Char('f')));
+        overview.input(&mut action, key(KeyCode::Char('a')));
+        overview.input(&mut action, key(KeyCode::Enter));
+        assert_eq!(overview.filter_input, "a");
+
+        action = Action::None;
+        assert!(overview.input(&mut action, key(KeyCode::Esc)));
+        assert_eq!(overview.filter_input, "");
+        match &action {
+            Action::UpdateJobList(JobListAction::SetFilter(text)) => assert!(text.is_empty()),
+            other => panic!("expected a clearing SetFilter, got {:?}", other),
+        }
+    }
+
     /// Regression test: rendering into a terminal narrower than the
     /// manually constructed squeue command rect must not panic.
     #[test]
@@ -1244,6 +1514,16 @@ mod tests {
         jobs.set_index(0).unwrap();
         let terminal = snapshot_terminal(&jobs, false, false);
         insta::assert_snapshot!("running_job_with_stats", terminal.backend());
+    }
+
+    #[test]
+    fn test_snapshot_filtered_joblist() {
+        let mut jobs = make_snapshot_joblist();
+        // deterministic filter: only "train_model" matches, and the
+        // title shows the indicator with the 1/3 counts
+        jobs.set_filter("train", &JobColumn::defaults());
+        let terminal = snapshot_terminal(&jobs, false, true);
+        insta::assert_snapshot!("filtered_joblist", terminal.backend());
     }
 
     #[test]

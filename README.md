@@ -77,6 +77,7 @@ stama --completions fish > ~/.config/fish/completions/stama.fish
 5. **Job allocation:** The job allocation menu can be accessed by pressing 'a' inside stama. The job allocation menu shows a list of saved salloc commands New presets can be created by navigating to the 'create new' entry.
 ![20240421_19h48m15s_grim](https://github.com/Gordi42/stama/assets/118457787/23bb3bc0-1746-46e3-ba5f-2d7ab998ccc0)
 6. **Change squeue command:** Press '/' or click on the squeue command with the mouse to change the squeue command, 'squeue' without any additional arguments will show all running jobs from all users.
+7. **Filter the job list:** Press 'f' to filter the visible jobs while typing (case-insensitive substring over the displayed columns; input containing regex characters is matched as a regular expression when it compiles, e.g. `gpu|cpu`). 'Enter' keeps the filter active (the job list then shows `filter: <text> (matching/total)`), 'Esc' clears it. The filter only narrows the display — sorting, notifications and the squeue command still see all jobs.
 
 ## Configuration
 Stama stores its settings in '($HOME)/.config/stama/config.toml'. All settings can be changed from within stama in the user settings menu ('o'), including the columns of the job table ("Job columns", a comma-separated list). Alternatively, edit the config file directly. For example, to show the job priority instead of the node count:

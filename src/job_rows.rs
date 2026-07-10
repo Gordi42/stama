@@ -94,6 +94,65 @@ pub fn build_rows(jobs: &[Job], group_arrays: bool, expanded: &HashSet<String>) 
     rows
 }
 
+/// Narrows display rows to the jobs matching a filter predicate.
+///
+/// Single rows are kept iff their job matches. A group row is kept iff
+/// at least one of its tasks matches, and its task indices are narrowed
+/// to the matching tasks, so the aggregate status counts reflect only
+/// the matching tasks. The task rows of an expanded group are rebuilt
+/// from the narrowed indices (with the tree glyphs recomputed).
+pub fn filter_rows<F>(rows: Vec<JobRow>, jobs: &[Job], matches: F) -> Vec<JobRow>
+where
+    F: Fn(&Job) -> bool,
+{
+    let mut filtered = Vec::with_capacity(rows.len());
+    for row in rows {
+        match row {
+            JobRow::Single { job_index } => {
+                if matches(&jobs[job_index]) {
+                    filtered.push(JobRow::Single { job_index });
+                }
+            }
+            JobRow::Group {
+                base_id,
+                task_indices,
+                expanded,
+            } => {
+                let matching: Vec<usize> = task_indices
+                    .into_iter()
+                    .filter(|&index| matches(&jobs[index]))
+                    .collect();
+                if matching.is_empty() {
+                    continue;
+                }
+                let task_rows = expanded.then(|| {
+                    let last_pos = matching.len() - 1;
+                    matching
+                        .iter()
+                        .enumerate()
+                        .map(|(pos, &job_index)| JobRow::Task {
+                            job_index,
+                            last: pos == last_pos,
+                        })
+                        .collect::<Vec<JobRow>>()
+                });
+                filtered.push(JobRow::Group {
+                    base_id,
+                    task_indices: matching,
+                    expanded,
+                });
+                if let Some(task_rows) = task_rows {
+                    filtered.extend(task_rows);
+                }
+            }
+            // the tasks of an expanded group are rebuilt from the
+            // narrowed group above, so the original rows are dropped
+            JobRow::Task { .. } => {}
+        }
+    }
+    filtered
+}
+
 /// The compact aggregate status of a group's tasks, e.g. "3R 10PD 37CD".
 ///
 /// The counts are listed in a fixed order (R, PD, CG, CD, F, TO, CA, ?)
@@ -262,6 +321,85 @@ mod tests {
                     expanded: false,
                 },
                 JobRow::Single { job_index: 1 },
+            ]
+        );
+    }
+
+    // ----------------------------------------------------------------
+    // filter_rows
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn filter_keeps_matching_singles_and_narrows_groups() {
+        // mixed_jobs: single "42" (R), group 100 (100_1 R, 100_2 PD),
+        // single "7" (CD), group 200 (200_0 R, 200_[5-9] PD)
+        let jobs = mixed_jobs();
+        let rows = build_rows(&jobs, true, &HashSet::new());
+        let rows = filter_rows(rows, &jobs, |job| job.status == JobStatus::Pending);
+        // only the pending tasks survive: the singles are dropped and
+        // both groups are narrowed to their pending task
+        assert_eq!(
+            rows,
+            vec![
+                JobRow::Group {
+                    base_id: "100".to_string(),
+                    task_indices: vec![2],
+                    expanded: false,
+                },
+                JobRow::Group {
+                    base_id: "200".to_string(),
+                    task_indices: vec![5],
+                    expanded: false,
+                },
+            ]
+        );
+        // the aggregate counts reflect only the matching tasks
+        let tasks: Vec<&Job> = vec![&jobs[2]];
+        assert_eq!(status_counts(&tasks), "1PD");
+    }
+
+    #[test]
+    fn filter_drops_groups_without_matching_tasks() {
+        let jobs = mixed_jobs();
+        let rows = build_rows(&jobs, true, &HashSet::new());
+        let rows = filter_rows(rows, &jobs, |job| job.status == JobStatus::Completed);
+        // only the completed single job "7" matches anything
+        assert_eq!(rows, vec![JobRow::Single { job_index: 3 }]);
+
+        // no match at all: the result is empty
+        let rows = build_rows(&jobs, true, &HashSet::new());
+        let rows = filter_rows(rows, &jobs, |_| false);
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn filter_rebuilds_expanded_task_rows_with_tree_glyphs() {
+        // three tasks of one group, the middle one filtered out
+        let jobs = vec![
+            job("100_1", JobStatus::Running),
+            job("100_2", JobStatus::Pending),
+            job("100_3", JobStatus::Running),
+        ];
+        let expanded: HashSet<String> = ["100".to_string()].into();
+        let rows = build_rows(&jobs, true, &expanded);
+        let rows = filter_rows(rows, &jobs, |job| job.status == JobStatus::Running);
+        // the surviving last task carries the closing glyph flag
+        assert_eq!(
+            rows,
+            vec![
+                JobRow::Group {
+                    base_id: "100".to_string(),
+                    task_indices: vec![0, 2],
+                    expanded: true,
+                },
+                JobRow::Task {
+                    job_index: 0,
+                    last: false,
+                },
+                JobRow::Task {
+                    job_index: 2,
+                    last: true,
+                },
             ]
         );
     }

@@ -836,6 +836,47 @@ mod tests {
         assert_eq!(app.menus.log_viewer.lines(), ["hello", "world"]);
     }
 
+    /// End-to-end through the app's key path: 'f' opens the filter
+    /// prompt, typing narrows the visible rows live, Enter keeps the
+    /// filter and Esc clears it again.
+    #[test]
+    fn filter_key_flow_narrows_and_clears_the_job_list() {
+        let mut app = app_with_fake(Arc::new(FakeScheduler::default()));
+        for (id, name) in [("1", "train_model"), ("2", "preprocess"), ("3", "trainer")] {
+            let mut job = Job::new_default();
+            job.id = id.to_string();
+            job.name = name.to_string();
+            app.joblist.jobs.push(job);
+        }
+        assert_eq!(app.joblist.len(), 3);
+
+        let press = |app: &mut App, code: KeyCode| {
+            app.input(KeyEvent::new(code, KeyModifiers::NONE));
+        };
+
+        // 'f' opens the prompt; typing filters on every keystroke
+        press(&mut app, KeyCode::Char('f'));
+        assert!(app.menus.job_overview.filter_prompt);
+        for c in "train".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert_eq!(app.joblist.len(), 2);
+        assert_eq!(app.joblist.filter_text(), Some("train"));
+
+        // Enter keeps the filter active and closes the prompt
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.menus.job_overview.filter_prompt);
+        assert_eq!(app.joblist.len(), 2);
+
+        // job actions target the selected *visible* job
+        assert!(["train_model", "trainer"].contains(&app.joblist.get_job().unwrap().name.as_str()));
+
+        // Esc clears the filter: all rows are visible again
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.joblist.len(), 3);
+        assert_eq!(app.joblist.filter_text(), None);
+    }
+
     #[test]
     fn ssh_with_empty_node_list_opens_an_error_message() {
         let mut app = app_with_nodes(vec![]);

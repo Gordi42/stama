@@ -4,8 +4,9 @@ use std::process::Command;
 use std::sync::Arc;
 
 use crate::columns::JobColumn;
+use crate::filter::JobFilter;
 use crate::job::{array_base_id, Job};
-use crate::job_rows::{build_rows, JobRow};
+use crate::job_rows::{build_rows, filter_rows, JobRow};
 use crate::notify::{detect_transitions, JobTransition};
 use crate::scheduler::{Scheduler, SlurmScheduler};
 use crate::update_content::{
@@ -25,6 +26,9 @@ pub enum JobListAction {
     UpdateSqueueCommand(String),
     /// Expands/collapses the selected job-array group row.
     ToggleGroup,
+    /// Sets the display filter to the given input; an empty string
+    /// clears the filter (see [`crate::filter::JobFilter`]).
+    SetFilter(String),
 }
 
 /// A stable reference to a display row, used to restore the selection
@@ -89,6 +93,10 @@ pub struct JobList {
     // The base ids of the currently expanded array groups. Kept across
     // refreshes so a group stays expanded when new content arrives.
     expanded_groups: HashSet<String>,
+    // The active display filter (None = show all jobs). The filter
+    // only narrows the *visible* rows; sorting, notifications and
+    // duplicate removal operate on the unfiltered job list.
+    filter: Option<JobFilter>,
 }
 
 // ====================================================================
@@ -120,6 +128,7 @@ impl JobList {
             },
             group_job_arrays: true,
             expanded_groups: HashSet::new(),
+            filter: None,
         }
     }
 }
@@ -161,11 +170,32 @@ fn get_user() -> Option<String> {
 
 impl JobList {
     /// Returns the display rows of the job table: single jobs,
-    /// job-array group headers and (for expanded groups) task rows.
+    /// job-array group headers and (for expanded groups) task rows,
+    /// narrowed to the jobs matching the active display filter.
     /// The rows are recomputed from the flat job list on every call,
     /// so they can never go stale.
     pub fn rows(&self) -> Vec<JobRow> {
-        build_rows(&self.jobs, self.group_job_arrays, &self.expanded_groups)
+        let rows = build_rows(&self.jobs, self.group_job_arrays, &self.expanded_groups);
+        match &self.filter {
+            Some(filter) => filter_rows(rows, &self.jobs, |job| filter.matches(job)),
+            None => rows,
+        }
+    }
+
+    /// The input of the active display filter, `None` when no filter
+    /// is active.
+    pub fn filter_text(&self) -> Option<&str> {
+        self.filter.as_ref().map(|filter| filter.text())
+    }
+
+    /// The number of jobs (of the flat, ungrouped list) matching the
+    /// active filter; all jobs when no filter is active. Shown in the
+    /// filter indicator as "matching/total".
+    pub fn filter_match_count(&self) -> usize {
+        match &self.filter {
+            Some(filter) => self.jobs.iter().filter(|job| filter.matches(job)).count(),
+            None => self.jobs.len(),
+        }
     }
 
     /// Returns the selected job. For a selected array-group header row
@@ -255,8 +285,10 @@ impl JobList {
     /// Sets the index of the selected job.
     /// Returns an error if the index is out of bounds.
     pub fn set_index(&mut self, index: usize) -> Result<()> {
-        // first handle the case of an empty job list
-        if self.jobs.is_empty() {
+        // first handle the case of no visible rows (the job list is
+        // empty, or the active filter matches no job)
+        let row_count = self.len();
+        if row_count == 0 {
             // set the selected index to 0
             self.selected = 0;
             // set the job details and log tail to "No job selected"
@@ -264,9 +296,9 @@ impl JobList {
             self.log_tail = "No job selected".to_string();
             return Ok(());
         }
-        // now handle the case of a non-empty job list
+        // now handle the case of a non-empty row list
         // check if the index is out of bounds (of the visible rows)
-        if index >= self.len() {
+        if index >= row_count {
             return Err(eyre!("Index out of bounds"));
         }
         self.selected = index;
@@ -365,6 +397,23 @@ impl JobList {
             JobListAction::UpdateSqueueCommand(command) => {
                 self.squeue_command = command;
             }
+            JobListAction::SetFilter(text) => {
+                self.set_filter(&text, columns);
+            }
+        }
+    }
+
+    /// Sets (with an empty input: clears) the display filter, matching
+    /// against the displayed `columns`. The previously selected row
+    /// stays selected if it is still visible; otherwise the selection
+    /// resets to the first row.
+    pub fn set_filter(&mut self, text: &str, columns: &[JobColumn]) {
+        let key = self.selected_row_key();
+        self.filter = JobFilter::new(text, columns);
+        match key {
+            Some(key) => self.reselect_row(&key),
+            // unwrap is safe: set_index(0) always succeeds
+            None => self.set_index(0).unwrap(),
         }
     }
 
@@ -519,12 +568,14 @@ impl JobList {
 
     /// Select the next job in the list.
     pub fn next(&mut self) {
-        // check if the job list is empty
-        if self.jobs.is_empty() {
+        // check if there are visible rows (the list may be empty or
+        // fully hidden by the active filter)
+        let row_count = self.len();
+        if row_count == 0 {
             return;
         }
         // if the selected job is the last job, select the first job
-        let new_index = (self.selected + 1) % self.len();
+        let new_index = (self.selected + 1) % row_count;
         // unwrap is safe here because new_index is always in bounds
         // this is guaranteed by the modulo operation and tested below
         self.set_index(new_index).unwrap();
@@ -533,11 +584,12 @@ impl JobList {
 
     /// Select the previous job in the list.
     pub fn previous(&mut self) {
-        // check if the job list is empty
-        if self.jobs.is_empty() {
+        // check if there are visible rows (the list may be empty or
+        // fully hidden by the active filter)
+        let job_count = self.len();
+        if job_count == 0 {
             return;
         }
-        let job_count = self.len();
         // if the selected job is the first job, select the last job
         let new_index = (self.selected + job_count - 1) % job_count;
         // unwrap is safe here because new_index is always in bounds
@@ -1228,6 +1280,107 @@ mod tests {
         assert_eq!(job_list.get_index(), 0);
     }
 
+    // ----------------------------------------------------------------
+    // display filter
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn test_filter_narrows_rows_and_clear_restores_them() {
+        // create_job_list: "1" job1 Running, "2" job2 Pending,
+        // "3" job3 Completing
+        let mut job_list = create_job_list();
+        let columns = JobColumn::defaults();
+
+        job_list.set_filter("job2", &columns);
+        assert_eq!(job_list.len(), 1);
+        assert_eq!(job_list.get_job().unwrap().id, "2");
+        assert_eq!(job_list.filter_text(), Some("job2"));
+        assert_eq!(job_list.filter_match_count(), 1);
+        // the unfiltered job list is untouched (display-only filter)
+        assert_eq!(job_list.jobs.len(), 3);
+
+        // an empty input clears the filter
+        job_list.set_filter("", &columns);
+        assert_eq!(job_list.len(), 3);
+        assert_eq!(job_list.filter_text(), None);
+        assert_eq!(job_list.filter_match_count(), 3);
+    }
+
+    #[test]
+    fn test_filter_keeps_the_selected_job_if_it_still_matches() {
+        let mut job_list = create_job_list();
+        let columns = JobColumn::defaults();
+
+        // select job "2", then apply a filter that keeps it visible
+        job_list.select_job_by_id("2".to_string()).unwrap();
+        job_list.set_filter("job", &columns);
+        assert_eq!(job_list.get_job().unwrap().id, "2");
+
+        // a filter that hides it resets the selection to the first row
+        job_list.set_filter("job3", &columns);
+        assert_eq!(job_list.get_index(), 0);
+        assert_eq!(job_list.get_job().unwrap().id, "3");
+
+        // clearing keeps the currently selected job selected
+        job_list.set_filter("", &columns);
+        assert_eq!(job_list.get_job().unwrap().id, "3");
+    }
+
+    #[test]
+    fn test_filter_with_no_matches_yields_empty_rows_without_panics() {
+        let mut job_list = create_job_list();
+        let columns = JobColumn::defaults();
+
+        job_list.set_filter("no such job", &columns);
+        assert_eq!(job_list.len(), 0);
+        assert_eq!(job_list.filter_match_count(), 0);
+        assert_eq!(job_list.get_index(), 0);
+        assert!(job_list.get_job().is_none());
+        // the flat job list itself is not empty (distinct empty states)
+        assert!(!job_list.is_empty());
+
+        // navigation and selection are safe on the empty row list
+        job_list.next();
+        job_list.previous();
+        assert!(job_list.set_index(0).is_ok());
+        job_list.handle_joblist_action(JobListAction::Select(0), &columns);
+
+        // clearing brings the rows back
+        job_list.set_filter("", &columns);
+        assert_eq!(job_list.len(), 3);
+    }
+
+    #[test]
+    fn test_filter_narrows_array_groups_to_matching_tasks() {
+        // one array (100_1 Running, 100_2 Pending after the edit below)
+        // and the single job "300"
+        let mut job_list = create_array_job_list();
+        job_list.jobs[1].status = JobStatus::Pending;
+        let columns = JobColumn::defaults();
+
+        // "PD" matches only the pending task: the group survives with
+        // just that task, the single running job is hidden
+        job_list.set_filter("PD", &columns);
+        let rows = job_list.rows();
+        assert_eq!(rows.len(), 1);
+        match &rows[0] {
+            JobRow::Group { task_indices, .. } => assert_eq!(task_indices.len(), 1),
+            other => panic!("expected a group row, got {:?}", other),
+        }
+        // the group representative is the first *matching* task
+        assert_eq!(job_list.get_job().unwrap().id, "100_2");
+
+        // expanding the filtered group shows only the matching task
+        job_list.toggle_selected_group();
+        assert_eq!(job_list.len(), 2); // header + 1 task
+
+        // the filter persists across a refresh (sort + reselect)
+        let key = job_list.selected_row_key().unwrap();
+        job_list.sort_raw();
+        job_list.reselect_row(&key);
+        assert_eq!(job_list.len(), 2);
+    }
+
     #[test]
     fn test_get_user_has_no_trailing_whitespace() {
         // in a normal test environment either $USER or `whoami` yields
@@ -1272,6 +1425,8 @@ mod proptests {
         ToggleGroup,
         /// The "group job arrays" user option changed.
         SetGrouping(bool),
+        /// The display filter changed (empty input clears it).
+        SetFilter(String),
         /// A refresh tick replaced the job list.
         Refresh(Vec<Job>),
     }
@@ -1333,6 +1488,17 @@ mod proptests {
         prop::collection::vec(job(), 0..30)
     }
 
+    /// Random filter inputs: empty (= clear), plain substrings that
+    /// partially match the generated jobs, and regex-looking input
+    /// (both valid and invalid regexes).
+    fn filter_input() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just(String::new()),
+            "[a-z0-9]{1,4}",
+            "[0-9a-z.*+\\[\\](|]{1,6}",
+        ]
+    }
+
     fn action() -> impl Strategy<Value = Action> {
         prop_oneof![
             Just(Action::Next),
@@ -1343,6 +1509,7 @@ mod proptests {
             (0..ALL_COLUMNS.len()).prop_map(Action::SelectSortCategory),
             Just(Action::ToggleGroup),
             any::<bool>().prop_map(Action::SetGrouping),
+            filter_input().prop_map(Action::SetFilter),
             jobs().prop_map(Action::Refresh),
         ]
     }
@@ -1368,6 +1535,9 @@ mod proptests {
                 job_list.handle_joblist_action(JobListAction::ToggleGroup, columns)
             }
             Action::SetGrouping(grouping) => job_list.set_group_job_arrays(grouping),
+            Action::SetFilter(text) => {
+                job_list.handle_joblist_action(JobListAction::SetFilter(text), columns)
+            }
             Action::Refresh(new_jobs) => {
                 // the same steps update_jobs performs when the worker
                 // delivers new content (see JobList::update_jobs)
