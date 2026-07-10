@@ -8,7 +8,7 @@
 //! app can surface them to the user.
 
 use crate::job::{Job, JobStatus};
-use crate::scheduler::{sacct_user_filter, Scheduler, SlurmScheduler};
+use crate::scheduler::{sacct_user_filter, LogChunk, Scheduler, SlurmScheduler};
 use crate::user_options::UserOptions;
 use std::collections::HashSet;
 use std::sync::{mpsc, Arc};
@@ -26,12 +26,34 @@ pub const TIMEOUT_ERROR: &str =
 /// The number of lines shown from the end of a job's log file.
 const LOG_TAIL_LINES: usize = 100;
 
+/// What the live log view wants read on the next worker run: the log
+/// path it follows and the file offset it has consumed so far
+/// (`None` = the initial read, see [`Scheduler::log_since`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogFollowRequest {
+    pub path: String,
+    pub offset: Option<u64>,
+}
+
+/// The worker's answer to a [`LogFollowRequest`]: the path it read
+/// (so a stale answer for a previously followed file can be ignored)
+/// and the chunk, or `None` when the file is missing/unreadable (the
+/// log view then keeps waiting and the next tick polls again).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogFollowUpdate {
+    pub path: String,
+    pub chunk: Option<LogChunk>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Content {
     pub job: Option<Job>,
     pub job_list: Vec<Job>,
     pub details_text: String,
     pub log_text: String,
+    /// The incremental read for the live log view; `None` when no log
+    /// view was open when the worker started.
+    pub log_follow: Option<LogFollowUpdate>,
     /// The error text when fetching the job list failed (squeue/sacct);
     /// `None` when the update succeeded.
     pub error: Option<String>,
@@ -88,14 +110,25 @@ impl ContentUpdater {
         self.timeout = timeout;
     }
 
-    pub fn tick(&mut self, job: Option<Job>, command: String, options: UserOptions) -> ContentTick {
+    pub fn tick(
+        &mut self,
+        job: Option<Job>,
+        command: String,
+        options: UserOptions,
+        log_request: Option<LogFollowRequest>,
+    ) -> ContentTick {
         match &self.worker {
             Some(worker) => match worker.receiver.try_recv() {
                 // the worker finished: hand out its content and start
                 // the next refresh right away
                 Ok(mut content) => {
                     let job_clone = job.clone();
-                    self.start_worker(job, command, options);
+                    // the caller has not seen this content yet, so its
+                    // request still carries the offset from *before*
+                    // this chunk; advance it so the next worker does
+                    // not read (and deliver) the same bytes twice
+                    let log_request = advance_log_request(log_request, &content);
+                    self.start_worker(job, command, options, log_request);
                     update_job_content(job_clone, &mut content);
                     ContentTick::New(Box::new(content))
                 }
@@ -119,17 +152,23 @@ impl ContentUpdater {
                 }
             },
             None => {
-                self.start_worker(job, command, options);
+                self.start_worker(job, command, options, log_request);
                 ContentTick::Pending
             }
         }
     }
 
-    fn start_worker(&mut self, job: Option<Job>, command: String, options: UserOptions) {
+    fn start_worker(
+        &mut self,
+        job: Option<Job>,
+        command: String,
+        options: UserOptions,
+        log_request: Option<LogFollowRequest>,
+    ) {
         let (tx, rx) = mpsc::channel();
         let scheduler = Arc::clone(&self.scheduler);
         thread::spawn(move || {
-            tx.send(get_content(job, command, options, scheduler))
+            tx.send(get_content(job, command, options, log_request, scheduler))
                 .unwrap_or(());
         });
         self.worker = Some(Worker {
@@ -139,12 +178,31 @@ impl ContentUpdater {
     }
 }
 
+/// Advances a log-follow request past the chunk delivered in `content`
+/// (only when it answers the same path), so the next worker continues
+/// where that chunk ended instead of rereading it.
+fn advance_log_request(
+    request: Option<LogFollowRequest>,
+    content: &Content,
+) -> Option<LogFollowRequest> {
+    let mut request = request?;
+    if let Some(update) = &content.log_follow {
+        if update.path == request.path {
+            if let Some(chunk) = &update.chunk {
+                request.offset = Some(chunk.offset);
+            }
+        }
+    }
+    Some(request)
+}
+
 /// Fetches the job list, job details and log tail. Runs on the worker
 /// thread, so the individual commands simply run one after another.
 fn get_content(
     job: Option<Job>,
     command: String,
     options: UserOptions,
+    log_request: Option<LogFollowRequest>,
     scheduler: Arc<dyn Scheduler>,
 ) -> Content {
     let mut errors: Vec<String> = Vec::new();
@@ -194,6 +252,17 @@ fn get_content(
         }
     }
 
+    // the incremental read for the live log view; a missing/unreadable
+    // file is not an error but a "keep waiting" signal (chunk: None),
+    // so a log path that does not exist yet never spams error popups
+    let log_follow = log_request.map(|request| {
+        let chunk = scheduler.log_since(&request.path, request.offset).ok();
+        LogFollowUpdate {
+            path: request.path,
+            chunk,
+        }
+    });
+
     // if a job is JobStatus::Completing (from squeue), sacct may still
     // report a JobStatus::Completed entry with the same id
     // remove the JobStatus::Completed duplicates
@@ -204,6 +273,7 @@ fn get_content(
         job_list: joblist,
         details_text,
         log_text,
+        log_follow,
         error: if errors.is_empty() {
             None
         } else {
@@ -293,8 +363,25 @@ mod tests {
         command: &str,
         options: &UserOptions,
     ) -> Content {
+        tick_until_content_with(updater, job, command, options, None)
+    }
+
+    /// Like [`tick_until_content`], with a selected job and/or a
+    /// log-follow request passed on every tick.
+    fn tick_until_content_with(
+        updater: &mut ContentUpdater,
+        job: Option<Job>,
+        command: &str,
+        options: &UserOptions,
+        log_request: Option<LogFollowRequest>,
+    ) -> Content {
         for _ in 0..400 {
-            match updater.tick(job.clone(), command.to_string(), options.clone()) {
+            match updater.tick(
+                job.clone(),
+                command.to_string(),
+                options.clone(),
+                log_request.clone(),
+            ) {
                 ContentTick::New(content) => return *content,
                 _ => thread::sleep(Duration::from_millis(5)),
             }
@@ -418,6 +505,126 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
+    // log following (live log view)
+    // ----------------------------------------------------------------
+    //
+    // FakeScheduler inherits the trait's default log_since (real file
+    // reads), so these tests run against local temp files.
+
+    #[test]
+    fn log_follow_chunks_flow_through_the_content_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("job.log");
+        std::fs::write(&path, "one\ntwo\n").unwrap();
+        let path = path.to_str().unwrap().to_string();
+        let options = UserOptions::default();
+
+        // initial read: offset None yields the scrollback tail
+        let mut updater = ContentUpdater::with_scheduler(Arc::new(FakeScheduler::default()));
+        let request = LogFollowRequest {
+            path: path.clone(),
+            offset: None,
+        };
+        let content =
+            tick_until_content_with(&mut updater, None, "squeue", &options, Some(request));
+        let update = content.log_follow.expect("a log update must arrive");
+        assert_eq!(update.path, path);
+        let chunk = update.chunk.expect("the file exists");
+        assert_eq!(chunk.content, "one\ntwo\n");
+        assert!(!chunk.truncated);
+
+        // append and follow up with the returned offset: only the new
+        // bytes arrive (a fresh updater makes the timing deterministic)
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, b"three\n"))
+            .unwrap();
+        let mut updater = ContentUpdater::with_scheduler(Arc::new(FakeScheduler::default()));
+        let request = LogFollowRequest {
+            path: path.clone(),
+            offset: Some(chunk.offset),
+        };
+        let content =
+            tick_until_content_with(&mut updater, None, "squeue", &options, Some(request));
+        let chunk = content.log_follow.unwrap().chunk.unwrap();
+        assert_eq!(chunk.content, "three\n");
+    }
+
+    #[test]
+    fn log_follow_missing_file_yields_waiting_update_not_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("not_written_yet.log");
+        let path = path.to_str().unwrap().to_string();
+        let options = UserOptions::default();
+
+        let mut updater = ContentUpdater::with_scheduler(Arc::new(FakeScheduler::default()));
+        let request = LogFollowRequest {
+            path: path.clone(),
+            offset: None,
+        };
+        let content =
+            tick_until_content_with(&mut updater, None, "squeue", &options, Some(request));
+
+        // the update arrives with chunk: None ("keep waiting") and the
+        // missing file does not surface in the error popup channel
+        let update = content.log_follow.unwrap();
+        assert_eq!(update.path, path);
+        assert_eq!(update.chunk, None);
+        assert!(content.error.is_none());
+    }
+
+    #[test]
+    fn without_open_log_view_no_log_update_is_computed() {
+        let mut updater = ContentUpdater::with_scheduler(Arc::new(FakeScheduler::default()));
+        let content = tick_until_content(&mut updater, "squeue", &UserOptions::default());
+        assert_eq!(content.log_follow, None);
+    }
+
+    #[test]
+    fn advance_log_request_moves_past_the_delivered_chunk() {
+        let request = LogFollowRequest {
+            path: "/a.log".to_string(),
+            offset: None,
+        };
+        let mut content = Content {
+            job: None,
+            job_list: Vec::new(),
+            details_text: String::new(),
+            log_text: String::new(),
+            log_follow: Some(LogFollowUpdate {
+                path: "/a.log".to_string(),
+                chunk: Some(LogChunk {
+                    content: "x\n".to_string(),
+                    offset: 42,
+                    truncated: false,
+                }),
+            }),
+            error: None,
+        };
+
+        // the same path: the next worker continues at the chunk's end
+        let advanced = advance_log_request(Some(request.clone()), &content).unwrap();
+        assert_eq!(advanced.offset, Some(42));
+
+        // a stale update for a different file leaves the request alone
+        content.log_follow.as_mut().unwrap().path = "/other.log".to_string();
+        let advanced = advance_log_request(Some(request.clone()), &content).unwrap();
+        assert_eq!(advanced.offset, None);
+
+        // an unreadable file ("keep waiting") leaves the offset alone
+        content.log_follow = Some(LogFollowUpdate {
+            path: "/a.log".to_string(),
+            chunk: None,
+        });
+        let advanced = advance_log_request(Some(request), &content).unwrap();
+        assert_eq!(advanced.offset, None);
+
+        // no request in, no request out
+        assert_eq!(advance_log_request(None, &content), None);
+    }
+
+    // ----------------------------------------------------------------
     // hang detection
     // ----------------------------------------------------------------
 
@@ -457,18 +664,18 @@ mod tests {
 
         // the first tick spawns the (hanging) worker
         assert!(matches!(
-            updater.tick(None, "squeue".to_string(), options.clone()),
+            updater.tick(None, "squeue".to_string(), options.clone(), None),
             ContentTick::Pending
         ));
         // the worker has not delivered within the timeout: it is
         // abandoned and the timeout is reported exactly once
         assert!(matches!(
-            updater.tick(None, "squeue".to_string(), options.clone()),
+            updater.tick(None, "squeue".to_string(), options.clone(), None),
             ContentTick::TimedOut
         ));
         // the slot is free again, so the next tick starts a fresh worker
         assert!(matches!(
-            updater.tick(None, "squeue".to_string(), options),
+            updater.tick(None, "squeue".to_string(), options, None),
             ContentTick::Pending
         ));
     }

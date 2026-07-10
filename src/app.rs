@@ -116,7 +116,7 @@ impl App {
         // create the joblist (sharing the scheduler with the app)
         let mut joblist = JobList::with_scheduler(Arc::clone(&scheduler));
         // start the main joblist thread to update the jobs
-        joblist.update_jobs(&user_options);
+        joblist.update_jobs(&user_options, None);
         let menus = MenuContainer::new(&user_options, &joblist);
         // create the app
         Self {
@@ -241,6 +241,10 @@ impl App {
             } => self.open_kill_array_confirmation(&base_id, task_count),
             JobActions::KillArrayConfirmed { base_id } => self.cancel_by_id(&base_id),
             JobActions::OpenLog(_) => self.open_log(),
+            // the live log view takes the same path as pressing 'L' in
+            // the job overview: the menu container resolves the log
+            // path of the selected job and opens the fullscreen viewer
+            JobActions::ViewLog(_) => self.menus.activate_menu(OpenMenu::LogView, &self.joblist),
             JobActions::OpenSubmission(_) => self.open_submissions(),
             JobActions::GoWorkDir(_) => self.go_workdir(),
             JobActions::SSH(_) => self.ssh_to_node(),
@@ -527,7 +531,14 @@ impl App {
     /// error popup, and job status transitions are notified to the
     /// user if enabled in the user options.
     pub fn update_jobs(&mut self) {
-        let outcome = self.joblist.update_jobs(&self.user_options);
+        // while the log view is open, the background worker also reads
+        // the bytes appended to the followed log file since the offset
+        // the view has consumed so far
+        let log_request = self.menus.log_viewer.follow_request();
+        let outcome = self.joblist.update_jobs(&self.user_options, log_request);
+        if let Some(update) = outcome.log_follow {
+            self.menus.log_viewer.apply_update(update);
+        }
         match outcome.status {
             // nothing new this tick; leave the popup state alone
             UpdateStatus::Pending => {}
@@ -768,6 +779,61 @@ mod tests {
         app.handle_action();
         assert_eq!(app.exit_command.as_deref(), Some("ssh gpu3"));
         assert!(app.should_quit);
+    }
+
+    /// End-to-end through the app: opening the log view via the job
+    /// actions menu, then ticking the refresh loop, streams the log
+    /// file's content (and later appends) into the viewer.
+    #[test]
+    fn log_view_follows_appended_content_through_update_ticks() {
+        use std::io::Write as _;
+        use std::thread;
+        use std::time::Duration;
+
+        /// Ticks the app's refresh loop until the predicate holds.
+        fn tick_until(app: &mut App, predicate: impl Fn(&App) -> bool) {
+            for _ in 0..400 {
+                app.update_jobs();
+                if predicate(app) {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            panic!("the log view did not receive the expected content in time");
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("job.log");
+        std::fs::write(&path, "hello\n").unwrap();
+
+        let mut app = app_with_fake(Arc::new(FakeScheduler::default()));
+        let mut job = Job::new_default();
+        job.output = Some(path.to_str().unwrap().to_string());
+        app.joblist.jobs.push(job);
+
+        // the "View log (live)" entry of the job actions menu opens
+        // the fullscreen viewer for the selected job
+        app.action = Action::JobOption(Box::new(JobActions::ViewLog(Job::new_default())));
+        app.handle_action();
+        assert!(app.menus.log_viewer.is_open());
+        assert_eq!(app.menus.log_viewer.path, path.to_str().unwrap());
+
+        // the refresh ticks deliver the initial scrollback ...
+        tick_until(&mut app, |app| {
+            app.menus.log_viewer.lines().iter().any(|l| l == "hello")
+        });
+
+        // ... and later appends arrive incrementally
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .and_then(|mut file| file.write_all(b"world\n"))
+            .unwrap();
+        tick_until(&mut app, |app| {
+            app.menus.log_viewer.lines().iter().any(|l| l == "world")
+        });
+        // no line was delivered twice along the way
+        assert_eq!(app.menus.log_viewer.lines(), ["hello", "world"]);
     }
 
     #[test]

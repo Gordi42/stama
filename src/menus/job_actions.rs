@@ -25,6 +25,9 @@ pub enum JobActions {
         base_id: String,
     },
     OpenLog(Job),
+    /// Open the fullscreen live log view inside the TUI (unlike
+    /// `OpenLog`, which opens the log file in the external editor).
+    ViewLog(Job),
     OpenSubmission(Job),
     GoWorkDir(Job),
     SSH(Job),
@@ -53,13 +56,7 @@ impl Default for JobActionsMenu {
 impl JobActionsMenu {
     pub fn new() -> Self {
         let job = Job::default();
-        let actions = vec![
-            JobActions::Kill(job.clone()),
-            JobActions::OpenLog(job.clone()),
-            JobActions::OpenSubmission(job.clone()),
-            JobActions::GoWorkDir(job.clone()),
-            JobActions::SSH(job.clone()),
-        ];
+        let actions = Self::standard_actions(&job);
         Self {
             open: false,
             index: 0,
@@ -71,11 +68,25 @@ impl JobActionsMenu {
         }
     }
 
+    /// The per-job actions, in menu order (must match
+    /// [`Self::standard_labels`]).
+    fn standard_actions(job: &Job) -> Vec<JobActions> {
+        vec![
+            JobActions::Kill(job.clone()),
+            JobActions::OpenLog(job.clone()),
+            JobActions::ViewLog(job.clone()),
+            JobActions::OpenSubmission(job.clone()),
+            JobActions::GoWorkDir(job.clone()),
+            JobActions::SSH(job.clone()),
+        ]
+    }
+
     /// The numbered labels of the per-job actions.
     fn standard_labels() -> Vec<String> {
         let mut labels = vec![
             "Kill job".to_string(),
-            "Open logfile".to_string(),
+            "Open logfile in editor".to_string(),
+            "View log (live)".to_string(),
             "Open submission script".to_string(),
             "cd to working directory".to_string(),
             "ssh to node".to_string(),
@@ -93,13 +104,7 @@ impl JobActionsMenu {
 
 impl JobActionsMenu {
     pub fn set_job(&mut self, job: Job) {
-        self.actions = vec![
-            JobActions::Kill(job.clone()),
-            JobActions::OpenLog(job.clone()),
-            JobActions::OpenSubmission(job.clone()),
-            JobActions::GoWorkDir(job.clone()),
-            JobActions::SSH(job.clone()),
-        ];
+        self.actions = Self::standard_actions(&job);
         self.labels = Self::standard_labels();
         self.job_name = job.get_jobname();
     }
@@ -210,27 +215,14 @@ impl Menu for JobActionsMenu {
             KeyCode::Char('?') => {
                 *action = Action::OpenMenu(OpenMenu::Help(HelpContext::JobActions));
             }
-            KeyCode::Char('1') => {
-                self.set_index(0);
-                self.perform_action(action);
+            // a digit selects and executes the numbered action directly
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                let index = c as i64 - '1' as i64;
+                if (0..self.actions.len() as i64).contains(&index) {
+                    self.set_index(index as i32);
+                    self.perform_action(action);
+                }
             }
-            KeyCode::Char('2') => {
-                self.set_index(1);
-                self.perform_action(action);
-            }
-            KeyCode::Char('3') => {
-                self.set_index(2);
-                self.perform_action(action);
-            }
-            KeyCode::Char('4') => {
-                self.set_index(3);
-                self.perform_action(action);
-            }
-            KeyCode::Char('5') => {
-                self.set_index(4);
-                self.perform_action(action);
-            }
-
             _ => {}
         }
         true

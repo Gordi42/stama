@@ -90,6 +90,17 @@ pub trait Scheduler: Send + Sync {
 
     /// Returns the last `lines` lines of the file at `path`.
     fn log_tail(&self, path: &str, lines: usize) -> Result<String, SchedulerError>;
+
+    /// Incremental log reading for the live log view.
+    ///
+    /// With `offset: None` the last [`LOG_VIEW_INITIAL_LINES`] lines are
+    /// returned (the initial scrollback); with `Some(offset)` only the
+    /// bytes appended since that offset. See [`read_log_since`] for the
+    /// truncation and capping behavior signalled via
+    /// [`LogChunk::truncated`].
+    fn log_since(&self, path: &str, offset: Option<u64>) -> Result<LogChunk, SchedulerError> {
+        read_log_since(path, offset)
+    }
 }
 
 // ====================================================================
@@ -382,13 +393,28 @@ fn file_error(path: &str, error: std::io::Error) -> SchedulerError {
 /// conversion. Returns an error if the file does not exist or cannot
 /// be read.
 pub fn read_last_lines(path: &str, lines: usize) -> Result<String, SchedulerError> {
-    const CHUNK_SIZE: u64 = 8192;
-
     let mut file = File::open(path).map_err(|e| file_error(path, e))?;
     let len = file.metadata().map_err(|e| file_error(path, e))?.len();
+    let buffer = read_tail_buffer(&mut file, path, len, lines)?;
 
-    // read chunks from the end of the file until the buffer contains
-    // more newlines than requested lines (or the whole file is read)
+    let text = String::from_utf8_lossy(&buffer);
+    let all_lines: Vec<&str> = text.lines().collect();
+    let start = all_lines.len().saturating_sub(lines);
+    Ok(all_lines[start..].join("\n"))
+}
+
+/// Reads chunks from the end of the file (whose size is `len`) until
+/// the buffer contains more newlines than requested `lines` (or the
+/// whole file is read). The buffer may start mid-line; the callers cut
+/// it down to whole lines.
+fn read_tail_buffer(
+    file: &mut File,
+    path: &str,
+    len: u64,
+    lines: usize,
+) -> Result<Vec<u8>, SchedulerError> {
+    const CHUNK_SIZE: u64 = 8192;
+
     let mut buffer: Vec<u8> = Vec::new();
     let mut pos = len;
     while pos > 0 {
@@ -406,11 +432,121 @@ pub fn read_last_lines(path: &str, lines: usize) -> Result<String, SchedulerErro
             break;
         }
     }
+    Ok(buffer)
+}
 
-    let text = String::from_utf8_lossy(&buffer);
-    let all_lines: Vec<&str> = text.lines().collect();
-    let start = all_lines.len().saturating_sub(lines);
-    Ok(all_lines[start..].join("\n"))
+/// Cuts a tail buffer down to its last `lines` lines, byte-exact: a
+/// trailing piece without a newline counts as one line and trailing
+/// newlines are preserved (unlike [`read_last_lines`], which joins the
+/// lines). This keeps the returned bytes contiguous with the file
+/// offset after the buffer, so incremental reads can continue exactly
+/// where the tail ended.
+fn tail_of_buffer(buffer: &[u8], lines: usize) -> &[u8] {
+    if buffer.is_empty() || lines == 0 {
+        return &buffer[buffer.len()..];
+    }
+    let newline_positions: Vec<usize> = buffer
+        .iter()
+        .enumerate()
+        .filter(|(_, &byte)| byte == b'\n')
+        .map(|(index, _)| index)
+        .collect();
+    let ends_with_newline = buffer.last() == Some(&b'\n');
+    let total = newline_positions.len() + usize::from(!ends_with_newline);
+    if total <= lines {
+        return buffer;
+    }
+    let skip = total - lines;
+    &buffer[newline_positions[skip - 1] + 1..]
+}
+
+// ====================================================================
+//  INCREMENTAL LOG READING (live log view)
+// ====================================================================
+
+/// The number of scrollback lines loaded when the live log view opens.
+pub const LOG_VIEW_INITIAL_LINES: usize = 1000;
+
+/// The maximum number of bytes a single incremental read returns. If
+/// more was appended between two polls, only the newest bytes are
+/// returned and the chunk is marked as truncated.
+const MAX_LOG_DELTA_BYTES: u64 = 2 * 1024 * 1024;
+
+/// One incremental read of a log file (see [`read_log_since`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogChunk {
+    /// The bytes read, lossily converted to UTF-8.
+    pub content: String,
+    /// The file offset after the read; pass it to the next call.
+    pub offset: u64,
+    /// True when `content` is *not* contiguous with previously read
+    /// data (the file shrank, or more than the cap was appended); the
+    /// caller must drop its accumulated text and start from `content`.
+    pub truncated: bool,
+}
+
+/// Reads new content of a (growing) log file.
+///
+/// * `offset: None`: the initial read. Returns the last
+///   [`LOG_VIEW_INITIAL_LINES`] lines byte-exact (trailing newline
+///   preserved) plus the file length as the next offset.
+/// * `offset: Some(off)` with a file at least `off` bytes long: returns
+///   exactly the bytes appended since `off` (at most
+///   [`MAX_LOG_DELTA_BYTES`]; an excess is skipped and signalled via
+///   [`LogChunk::truncated`]).
+/// * `offset: Some(off)` with a file *shorter* than `off`: the file was
+///   truncated/replaced. Rereads the tail like an initial read and
+///   signals it via [`LogChunk::truncated`].
+///
+/// Non-UTF-8 bytes are tolerated via a lossy conversion. A missing or
+/// unreadable file is an error (the caller keeps polling).
+pub fn read_log_since(path: &str, offset: Option<u64>) -> Result<LogChunk, SchedulerError> {
+    let mut file = File::open(path).map_err(|e| file_error(path, e))?;
+    let len = file.metadata().map_err(|e| file_error(path, e))?.len();
+
+    // the initial read and the reread after a file truncation share
+    // the same "fresh tail" logic and only differ in the flag
+    let fresh_tail = |file: &mut File, truncated: bool| -> Result<LogChunk, SchedulerError> {
+        let buffer = read_tail_buffer(file, path, len, LOG_VIEW_INITIAL_LINES)?;
+        let tail = tail_of_buffer(&buffer, LOG_VIEW_INITIAL_LINES);
+        Ok(LogChunk {
+            content: String::from_utf8_lossy(tail).to_string(),
+            offset: len,
+            truncated,
+        })
+    };
+
+    let offset = match offset {
+        None => return fresh_tail(&mut file, false),
+        Some(offset) => offset,
+    };
+    if len < offset {
+        // the file shrank: it was truncated or replaced
+        return fresh_tail(&mut file, true);
+    }
+    if len == offset {
+        return Ok(LogChunk {
+            content: String::new(),
+            offset: len,
+            truncated: false,
+        });
+    }
+    // read the appended bytes, capped at MAX_LOG_DELTA_BYTES
+    let (start, truncated) = if len - offset > MAX_LOG_DELTA_BYTES {
+        (len - MAX_LOG_DELTA_BYTES, true)
+    } else {
+        (offset, false)
+    };
+    file.seek(SeekFrom::Start(start))
+        .map_err(|e| file_error(path, e))?;
+    let mut buffer = vec![0u8; (len - start) as usize];
+    file.read_exact(&mut buffer)
+        .map_err(|e| file_error(path, e))?;
+    Ok(LogChunk {
+        content: String::from_utf8_lossy(&buffer).to_string(),
+        offset: len,
+        truncated,
+    })
 }
 
 // ====================================================================
@@ -1315,6 +1451,156 @@ mod tests {
             }
             other => panic!("expected FileRead error, got {:?}", other),
         }
+    }
+
+    // ----------------------------------------------------------------
+    // read_log_since (incremental reads for the live log view)
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn read_log_since_initial_read_returns_tail_and_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("job.log");
+        let path = path.to_str().unwrap();
+        std::fs::write(path, "line1\nline2\nline3\n").unwrap();
+
+        let chunk = read_log_since(path, None).unwrap();
+        // the initial read is byte-exact: the trailing newline is kept,
+        // so the next incremental read continues on a fresh line
+        assert_eq!(chunk.content, "line1\nline2\nline3\n");
+        assert_eq!(chunk.offset, 18);
+        assert!(!chunk.truncated);
+    }
+
+    #[test]
+    fn read_log_since_initial_read_is_limited_to_the_scrollback_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("long.log");
+        let path = path.to_str().unwrap();
+        // more lines than the initial scrollback (and > one 8192-byte
+        // chunk, so the backwards chunked reading path is exercised)
+        let content: String = (0..LOG_VIEW_INITIAL_LINES + 200)
+            .map(|i| format!("this is log line number {:06}\n", i))
+            .collect();
+        std::fs::write(path, &content).unwrap();
+
+        let chunk = read_log_since(path, None).unwrap();
+        let lines: Vec<&str> = chunk.content.lines().collect();
+        assert_eq!(lines.len(), LOG_VIEW_INITIAL_LINES);
+        assert_eq!(lines[0], "this is log line number 000200");
+        // the offset points at the end of the file, so nothing of the
+        // skipped head is ever reread
+        assert_eq!(chunk.offset, content.len() as u64);
+    }
+
+    #[test]
+    fn read_log_since_detects_appends_across_multiple_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("job.log");
+        let path = path.to_str().unwrap();
+        std::fs::write(path, "first\n").unwrap();
+
+        let initial = read_log_since(path, None).unwrap();
+        assert_eq!(initial.content, "first\n");
+
+        // nothing appended: an empty chunk with an unchanged offset
+        let unchanged = read_log_since(path, Some(initial.offset)).unwrap();
+        assert_eq!(unchanged.content, "");
+        assert_eq!(unchanged.offset, initial.offset);
+        assert!(!unchanged.truncated);
+
+        // append twice; each read returns exactly the new bytes and
+        // the offsets add up
+        let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        std::io::Write::write_all(&mut file, b"second\n").unwrap();
+        let second = read_log_since(path, Some(initial.offset)).unwrap();
+        assert_eq!(second.content, "second\n");
+        assert_eq!(second.offset, initial.offset + 7);
+        assert!(!second.truncated);
+
+        // a partial line (no trailing newline) is returned as-is ...
+        std::io::Write::write_all(&mut file, b"third").unwrap();
+        let third = read_log_since(path, Some(second.offset)).unwrap();
+        assert_eq!(third.content, "third");
+        assert_eq!(third.offset, second.offset + 5);
+
+        // ... and its continuation arrives with the next read
+        std::io::Write::write_all(&mut file, b" part\n").unwrap();
+        let fourth = read_log_since(path, Some(third.offset)).unwrap();
+        assert_eq!(fourth.content, " part\n");
+        assert_eq!(fourth.offset, third.offset + 6);
+    }
+
+    #[test]
+    fn read_log_since_handles_file_truncation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("job.log");
+        let path = path.to_str().unwrap();
+        std::fs::write(path, "old content, quite long\n").unwrap();
+        let initial = read_log_since(path, None).unwrap();
+
+        // the file is replaced by a shorter one (e.g. the job restarted)
+        std::fs::write(path, "new\n").unwrap();
+        let chunk = read_log_since(path, Some(initial.offset)).unwrap();
+        // the shrink is signalled and the content is a fresh tail read
+        assert!(chunk.truncated);
+        assert_eq!(chunk.content, "new\n");
+        assert_eq!(chunk.offset, 4);
+    }
+
+    #[test]
+    fn read_log_since_missing_file_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does_not_exist.log");
+
+        let result = read_log_since(path.to_str().unwrap(), None);
+        assert!(matches!(result, Err(SchedulerError::FileRead { .. })));
+        let result = read_log_since(path.to_str().unwrap(), Some(42));
+        assert!(matches!(result, Err(SchedulerError::FileRead { .. })));
+    }
+
+    #[test]
+    fn read_log_since_caps_oversized_deltas() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("burst.log");
+        let path = path.to_str().unwrap();
+        // more than MAX_LOG_DELTA_BYTES appended "since offset 0"
+        let line = "x".repeat(1023) + "\n";
+        let content = line.repeat((MAX_LOG_DELTA_BYTES / 1024) as usize + 16);
+        std::fs::write(path, &content).unwrap();
+
+        let chunk = read_log_since(path, Some(0)).unwrap();
+        // only the newest cap-sized window is returned, marked truncated
+        assert!(chunk.truncated);
+        assert_eq!(chunk.content.len() as u64, MAX_LOG_DELTA_BYTES);
+        assert_eq!(chunk.offset, content.len() as u64);
+    }
+
+    #[test]
+    fn read_log_since_tolerates_non_utf8_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("binary.log");
+        let path = path.to_str().unwrap();
+        std::fs::write(path, b"valid\n").unwrap();
+        let initial = read_log_since(path, None).unwrap();
+
+        let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        std::io::Write::write_all(&mut file, &[0xff, 0xfe, b'\n']).unwrap();
+        let chunk = read_log_since(path, Some(initial.offset)).unwrap();
+        assert!(chunk.content.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn tail_of_buffer_cuts_to_whole_lines() {
+        // trailing newline preserved, partial head line dropped
+        assert_eq!(tail_of_buffer(b"a\nbb\ncc\n", 2), b"bb\ncc\n");
+        // a trailing piece without a newline counts as one line
+        assert_eq!(tail_of_buffer(b"a\nbb\ncc", 2), b"bb\ncc");
+        // fewer lines than requested: everything is kept
+        assert_eq!(tail_of_buffer(b"a\nb\n", 5), b"a\nb\n");
+        // edge cases
+        assert_eq!(tail_of_buffer(b"", 3), b"");
+        assert_eq!(tail_of_buffer(b"a\nb\n", 0), b"");
     }
 
     #[test]

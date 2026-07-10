@@ -1,0 +1,16 @@
+---
+source: src/menus/log_viewer.rs
+expression: terminal.backend()
+---
+"╭ /work/logs/train_model-424242.out ─────────────────────────────────────────── FOLLOW (f to stop) ╮"
+"│epoch 1/5: loss 0.91                                                                              │"
+"│epoch 2/5: loss 0.55                                                                              │"
+"│epoch 3/5: loss 0.34                                                                              │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"╰───────────────────────────────────────────────────────────────────────── Esc/q/L: close  ?: help ╯"

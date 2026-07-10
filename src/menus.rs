@@ -10,6 +10,7 @@ use crate::menus::{
     help::{HelpContext, HelpMenu},
     job_actions::JobActionsMenu,
     job_overview::JobOverview,
+    log_viewer::LogViewer,
     message::Message,
     node_select::NodeSelectMenu,
     user_options_menu::UserOptionsMenu,
@@ -23,6 +24,7 @@ pub mod confirmation;
 pub mod help;
 pub mod job_actions;
 pub mod job_overview;
+pub mod log_viewer;
 pub mod message;
 pub mod node_select;
 pub mod salloc;
@@ -34,6 +36,8 @@ pub enum OpenMenu {
     Help(HelpContext),
     Salloc,
     JobActions,
+    /// The fullscreen live log view of the selected job
+    LogView,
     /// The node selection popup for ssh-ing into a multi-node job
     NodeSelect {
         job_id: String,
@@ -140,6 +144,8 @@ pub struct MenuContainer {
     pub job_actions_menu: JobActionsMenu,
     /// A popup to pick one node of a multi-node job to ssh to
     pub node_select_menu: NodeSelectMenu,
+    /// The fullscreen live log view of the selected job
+    pub log_viewer: LogViewer,
     /// A menu for allocating jobs (salloc)
     pub salloc_menu: SallocMenu,
     /// A menu that shows the configurable user options
@@ -167,6 +173,7 @@ impl MenuContainer {
             ),
             job_actions_menu: JobActionsMenu::new(),
             node_select_menu: NodeSelectMenu::new(),
+            log_viewer: LogViewer::new(),
             salloc_menu: SallocMenu::new(),
             help_menu: HelpMenu::new(),
             message: Message::new_disabled(),
@@ -184,11 +191,14 @@ impl MenuContainer {
     /// The popup menus in front-to-back order (the most modal first).
     /// Rendering, keyboard input and mouse input all derive from this
     /// single ordering, so keys and clicks always go to the same menu.
-    fn popups_front_to_back(&mut self) -> [&mut dyn Menu; 7] {
+    fn popups_front_to_back(&mut self) -> [&mut dyn Menu; 8] {
         [
             &mut self.confirmation,
             &mut self.message,
             &mut self.help_menu,
+            // the fullscreen log view covers everything except the
+            // dialogs and the help popup above it
+            &mut self.log_viewer,
             &mut self.user_options_menu,
             &mut self.salloc_menu,
             // the node selection opens on top of the job actions menu
@@ -203,6 +213,9 @@ impl MenuContainer {
         match open_menu {
             OpenMenu::JobActions => {
                 self.open_job_action(joblist);
+            }
+            OpenMenu::LogView => {
+                self.open_log_view(joblist);
             }
             OpenMenu::Salloc => {
                 self.salloc_menu.activate();
@@ -241,6 +254,29 @@ impl MenuContainer {
                 self.message.kind = message::MessageKind::Error;
             }
         }
+    }
+
+    /// Opens the fullscreen live log view for the selected job (for a
+    /// selected job-array group row: for the group's first task). If no
+    /// job is selected or the job has no log path (e.g. completed jobs
+    /// from sacct), an error message is shown instead.
+    fn open_log_view(&mut self, joblist: &JobList) {
+        let job = match joblist.get_job() {
+            Some(job) => job,
+            None => {
+                self.error_message("No job selected");
+                return;
+            }
+        };
+        match job.get_stdout() {
+            Some(path) => self.log_viewer.activate(&path),
+            None => self.error_message("No log file found"),
+        }
+    }
+
+    fn error_message(&mut self, text: &str) {
+        self.message = Message::new(text);
+        self.message.kind = message::MessageKind::Error;
     }
 }
 
@@ -538,6 +574,64 @@ mod tests {
             container.job_actions_menu.actions[0],
             JobActions::Kill(_)
         ));
+    }
+
+    /// Opening the log view resolves the log path of the selected job
+    /// (with %j/%x placeholders expanded) and the fullscreen viewer
+    /// consumes key input until it is closed.
+    #[test]
+    fn test_open_log_view_for_selected_job() {
+        use crate::job::{Job, JobStatus};
+
+        let mut container = container();
+        let mut joblist = JobList::new();
+        let mut job = Job::new_default();
+        job.id = "4242".to_string();
+        job.output = Some("/logs/run-%j.out".to_string());
+        joblist.jobs.push(job);
+
+        container.activate_menu(OpenMenu::LogView, &joblist);
+
+        assert!(container.log_viewer.is_open());
+        assert_eq!(container.log_viewer.path, "/logs/run-4242.out");
+        // the viewer requests the initial read for its path
+        let request = container.log_viewer.follow_request().unwrap();
+        assert_eq!(request.path, "/logs/run-4242.out");
+        assert_eq!(request.offset, None);
+
+        // keys go to the viewer, not to the job overview ('q' would
+        // otherwise quit the app)
+        let mut action = Action::None;
+        container.input(&mut action, key(KeyCode::Char('q')));
+        assert!(matches!(action, Action::None));
+        assert!(!container.log_viewer.is_open());
+
+        // a job without a log path opens an error message instead
+        let mut sacct_job = Job::new_default();
+        sacct_job.status = JobStatus::Completed;
+        sacct_job.output = None;
+        let mut joblist = JobList::new();
+        joblist.jobs.push(sacct_job);
+        container.activate_menu(OpenMenu::LogView, &joblist);
+        assert!(!container.log_viewer.is_open());
+        assert!(container.message.is_open());
+        assert!(container.message.text.contains("No log file found"));
+
+        // an empty job list opens an error message as well
+        container.message = Message::new_disabled();
+        container.activate_menu(OpenMenu::LogView, &JobList::new());
+        assert!(!container.log_viewer.is_open());
+        assert!(container.message.text.contains("No job selected"));
+    }
+
+    /// The 'L' key of the job overview opens the log view through the
+    /// same action path the app dispatches.
+    #[test]
+    fn test_job_overview_key_l_emits_log_view_action() {
+        let mut container = container();
+        let mut action = Action::None;
+        container.input(&mut action, key(KeyCode::Char('L')));
+        assert!(matches!(action, Action::OpenMenu(OpenMenu::LogView)));
     }
 
     /// Confirming the dialog with 'y' emits the stored action

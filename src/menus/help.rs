@@ -21,6 +21,7 @@ use crate::mouse_input::MouseInput;
 pub enum HelpContext {
     JobOverview,
     JobActions,
+    LogView,
     AllocationMenu,
     StamaSettings,
 }
@@ -31,8 +32,9 @@ impl HelpContext {
         match self {
             HelpContext::JobOverview => 0,
             HelpContext::JobActions => 1,
-            HelpContext::AllocationMenu => 2,
-            HelpContext::StamaSettings => 3,
+            HelpContext::LogView => 2,
+            HelpContext::AllocationMenu => 3,
+            HelpContext::StamaSettings => 4,
         }
     }
 }
@@ -91,6 +93,7 @@ impl HelpMenu {
         let job_overview_entries = vec![
             HelpEntry::new("Down/Up (j/k)", "Next/Previous job"),
             HelpEntry::new("Enter (l)", "Open job actions menu"),
+            HelpEntry::new("L", "View log of selected job (fullscreen, live)"),
             HelpEntry::new("Space", "Expand/collapse the selected job array group"),
             HelpEntry::new("tab", "Select next sorting category"),
             HelpEntry::new("r", "Reverse sorting order"),
@@ -107,9 +110,27 @@ impl HelpMenu {
             HelpEntry::new("Down/Up (j/k)", "Next/Previous action"),
             HelpEntry::new("Enter (l)", "Execute action"),
             HelpEntry::new("Esc", "Close action menu"),
-            HelpEntry::new("1-5", "Select action"),
+            HelpEntry::new("1-6", "Select action"),
         ];
         let job_actions = HelpCategory::new("Job Actions", job_actions_entries);
+        // log view category
+        let log_view_entries = vec![
+            HelpEntry::new("Down/Up (j/k)", "Scroll one line"),
+            HelpEntry::new("d/u", "Scroll half a page down/up"),
+            HelpEntry::new("PgDn/PgUp", "Scroll a full page down/up"),
+            HelpEntry::new("g/G", "Jump to the top / bottom"),
+            HelpEntry::new(
+                "f",
+                "Toggle follow mode (auto-scroll to new log content; scrolling up stops following, G resumes)",
+            ),
+            HelpEntry::new(
+                "/",
+                "Search (case-insensitive substring), Enter jumps to the next match",
+            ),
+            HelpEntry::new("n/N", "Next/Previous search match"),
+            HelpEntry::new("Esc (q, L)", "Close the log view"),
+        ];
+        let log_view = HelpCategory::new("Log View", log_view_entries);
         // allocation menu category
         let allocation_menu_entries = vec![
             HelpEntry::new("Esc (q)", "Close allocation menu"),
@@ -162,6 +183,7 @@ impl HelpMenu {
         let categories = vec![
             job_overview,
             job_actions,
+            log_view,
             allocation_menu,
             stama_settings,
             info,

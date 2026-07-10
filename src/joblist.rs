@@ -8,7 +8,9 @@ use crate::job::{array_base_id, Job};
 use crate::job_rows::{build_rows, JobRow};
 use crate::notify::{detect_transitions, JobTransition};
 use crate::scheduler::{Scheduler, SlurmScheduler};
-use crate::update_content::{ContentTick, ContentUpdater, TIMEOUT_ERROR};
+use crate::update_content::{
+    ContentTick, ContentUpdater, LogFollowRequest, LogFollowUpdate, TIMEOUT_ERROR,
+};
 use crate::user_options::UserOptions;
 
 /// An enum to handle actions that change the selected job.
@@ -55,6 +57,10 @@ pub enum UpdateStatus {
 pub struct UpdateOutcome {
     pub status: UpdateStatus,
     pub transitions: Vec<JobTransition>,
+    /// The incremental log read for the live log view (when one was
+    /// requested and fresh content arrived); the app routes it to the
+    /// open log view.
+    pub log_follow: Option<LogFollowUpdate>,
 }
 
 /// A struct that contains all the informations about running jobs.
@@ -432,7 +438,11 @@ impl JobList {
     /// has to be surfaced to the user (see [`UpdateStatus`]), plus the
     /// job status transitions observed against the previous job list
     /// (see [`UpdateOutcome`]).
-    pub fn update_jobs(&mut self, user_options: &UserOptions) -> UpdateOutcome {
+    pub fn update_jobs(
+        &mut self,
+        user_options: &UserOptions,
+        log_request: Option<LogFollowRequest>,
+    ) -> UpdateOutcome {
         // keep the grouping flag in sync with the user options
         self.set_group_job_arrays(user_options.group_job_arrays);
         // get the currently selected job (the group representative for
@@ -442,27 +452,30 @@ impl JobList {
         let selected_key = self.selected_row_key();
         let command = self.squeue_command.clone();
         let mut transitions = Vec::new();
+        let mut log_follow = None;
         // check if the content updater returns a new job list
-        let status = match self
-            .content_updater
-            .tick(job.clone(), command, user_options.clone())
-        {
-            ContentTick::New(content) => {
-                let content = *content;
-                // diff the old job list against the fresh one before
-                // replacing it, so job status changes can be notified
-                transitions = detect_transitions(&self.jobs, &content.job_list);
-                self.jobs = content.job_list;
-                self.job_details = content.details_text;
-                self.log_tail = content.log_text;
-                match content.error {
-                    Some(error) => UpdateStatus::Error(error),
-                    None => UpdateStatus::Success,
+        let status =
+            match self
+                .content_updater
+                .tick(job.clone(), command, user_options.clone(), log_request)
+            {
+                ContentTick::New(content) => {
+                    let content = *content;
+                    // diff the old job list against the fresh one before
+                    // replacing it, so job status changes can be notified
+                    transitions = detect_transitions(&self.jobs, &content.job_list);
+                    self.jobs = content.job_list;
+                    self.job_details = content.details_text;
+                    self.log_tail = content.log_text;
+                    log_follow = content.log_follow;
+                    match content.error {
+                        Some(error) => UpdateStatus::Error(error),
+                        None => UpdateStatus::Success,
+                    }
                 }
-            }
-            ContentTick::Pending => UpdateStatus::Pending,
-            ContentTick::TimedOut => UpdateStatus::Error(TIMEOUT_ERROR.to_string()),
-        };
+                ContentTick::Pending => UpdateStatus::Pending,
+                ContentTick::TimedOut => UpdateStatus::Error(TIMEOUT_ERROR.to_string()),
+            };
         // sort the job list
         self.sort_raw();
         // try to select the row that was selected before the update
@@ -472,6 +485,7 @@ impl JobList {
         UpdateOutcome {
             status,
             transitions,
+            log_follow,
         }
     }
 

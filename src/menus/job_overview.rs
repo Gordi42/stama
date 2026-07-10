@@ -679,6 +679,10 @@ impl JobOverview {
             KeyCode::Enter | KeyCode::Char('l') => {
                 *action = Action::OpenMenu(OpenMenu::JobActions);
             }
+            // Open the fullscreen live log view of the selected job
+            KeyCode::Char('L') => {
+                *action = Action::OpenMenu(OpenMenu::LogView);
+            }
             // Expand/collapse the selected job-array group
             KeyCode::Char(' ') => {
                 *action = Action::UpdateJobList(JobListAction::ToggleGroup);
